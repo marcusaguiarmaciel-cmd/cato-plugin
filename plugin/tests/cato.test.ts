@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+const CATO_CMD = { command: 'cato', args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } }
+
 const NOISY_INSTALL = Array.from({ length: 300 }, (_, i) => `added package-${i}@1.0.${i} from registry`).join('\n')
 
 test('leitura de lockfile ou node_modules é negada antes de encher o contexto', async ($, on) => {
@@ -48,6 +50,6 @@ test('saída de leitura de código (cat, sed, grep) nunca é alterada', async ($
 test('/cato mostra o relatório mesmo sem chamadas registradas', async ($, on) => {
   mock.store(on)
   mock.clock(on)
-  const out = await $.command.run({ command: 'cato', args: '' })
+  const out = await $.command.run(CATO_CMD)
   expect(String((out as { text?: string }).text)).toContain('Ainda não há chamadas registradas')
 })

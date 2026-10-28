@@ -118,8 +118,8 @@ test('structural_search roda o ast-grep e devolve casamentos compactos; caminho 
   on('process.run', (_, e) => {
     calls.push([...e.argv])
     return e.argv[1] === '--version'
-      ? { value: { exitCode: 0, stdout: 'ast-grep 0.39.0', stderr: '' } }
-      : { value: { exitCode: 0, stdout: AST_GREP_STREAM, stderr: '' } }
+      ? { value: { exitCode: 0, stdout: 'ast-grep 0.39.0', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 0, stdout: AST_GREP_STREAM, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
 
   const ran = await $.tool.call({ tool: 'mcp__cato__structural_search', pattern: 'console.log($A)', lang: 'ts' })

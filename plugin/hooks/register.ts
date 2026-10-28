@@ -57,6 +57,11 @@ type Day = {
   missModelCost: number
   missOther: number
   missOtherCost: number
+  // Primeira chamada depois de uma compactação: reescreve o cache por design, não é miss
+  rebuilds: number
+  rebuildCost: number
+  // Chamadas de modelo sem preço conhecido: contadas, mas fora do custo
+  unpriced: number
   compressions: number
   compressedTokens: number
   blockedReads: number
@@ -108,16 +113,23 @@ let astGrep: string | null | undefined
 let graphCache: { mtimeMs: number; graph: Graph | null } | null = null
 const acks = new Set<string>()
 
-const dayKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10)
+// Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h
+const dayKey = (ms: number): string => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 const emptyDay = (): Day => ({
   calls: 0, cost: 0, read: 0, write: 0, output: 0, ctxSum: 0, maxCtx: 0, missIdle: 0, missIdleCost: 0,
-  missModel: 0, missModelCost: 0, missOther: 0, missOtherCost: 0, compressions: 0, compressedTokens: 0,
-  blockedReads: 0, guardHolds: 0,
+  missModel: 0, missModelCost: 0, missOther: 0, missOtherCost: 0, rebuilds: 0, rebuildCost: 0, unpriced: 0,
+  compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0,
 })
 
-const writePrice = (model: string): number =>
-  options.cacheTtlMinutes >= 60 ? priceFor(model).write1h : priceFor(model).write5m
+/** Preço por milhão de tokens da escrita de cache no TTL dado, ou null para modelo sem preço conhecido. */
+const writePrice = (model: string, ttlMinutes = options.cacheTtlMinutes): number | null => {
+  const p = priceFor(model)
+  return p ? (ttlMinutes >= 60 ? p.write1h : p.write5m) : null
+}
 
 /** Troca o texto de uma resposta MCP mantendo o formato que ela tinha (lista de blocos, `{ content }` ou texto). */
 function withText<T extends { result?: unknown }>(ran: T, text: string): T {
@@ -171,15 +183,18 @@ async function refreshStatus($: EngineInterface): Promise<void> {
   const ctx = usage.context.tokens ?? lastCtx
   if (!ctx) return $.ui.status(undefined)
   const model = lastModel || (await $.session.model())
+  const price = priceFor(model)
+  const write = writePrice(model)
   const parts = [`CATO ctx ${Math.round(ctx / 1000)}k`]
   if (compactedAt > lastStepAt) {
     parts.push('compactado')
   } else if (lastStepAt) {
     const idle = (await $.clock.now()) - lastStepAt
     if (idle > ttlMs) {
-      parts.push(`cache expirado: próximo turno ≈ ${usd((ctx * writePrice(model)) / 1e6)}`)
+      parts.push(write !== null ? `cache expirado: próximo turno ≈ ${usd((ctx * write) / 1e6)}` : 'cache expirado')
     } else {
-      parts.push(`próximo turno ≈ ${usd((ctx * priceFor(model).read) / 1e6, 3)}`, `cache expira em ${Math.ceil((ttlMs - idle) / 60_000)}min`)
+      if (price) parts.push(`próximo turno ≈ ${usd((ctx * price.read) / 1e6, 3)}`)
+      parts.push(`cache expira em ${Math.ceil((ttlMs - idle) / 60_000)}min`)
     }
   }
   if (usage.cost) parts.push(`sessão ${usd(usage.cost.usd)}`)
@@ -375,6 +390,8 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     `  pausa maior que o cache   ${period.missIdle}x  ${usd(period.missIdleCost)}`,
     `  troca de modelo           ${period.missModel}x  ${usd(period.missModelCost)}`,
     `  outras (prefixo mudou)    ${period.missOther}x  ${usd(period.missOtherCost)}`,
+    `Reconstruções esperadas após compactar (não são misses): ${period.rebuilds}x  ${usd(period.rebuildCost)}`,
+    ...(period.unpriced ? [`${period.unpriced} chamadas de modelo sem preço conhecido ficaram fora do custo.`] : []),
     '',
     `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
       `${period.compressions} saídas comprimidas (−${period.compressedTokens.toLocaleString('pt-BR')} tokens).`,
@@ -383,7 +400,8 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
   if (period.cost > 0 && period.missIdleCost / period.cost > 0.03) recs.push('Ao voltar de uma pausa longa, use /clear ou /compact em vez de continuar com contexto grande.')
   if (period.cost > 0 && period.missModelCost / period.cost > 0.02) recs.push('Evite trocar de modelo no meio da sessão; use um subagente com outro modelo.')
   if (period.calls && period.ctxSum / period.calls > 300_000) recs.push('O contexto médio passa de 300k: use /clear entre tarefas e /compact quando o CATO avisar.')
-  if (period.cost > 0 && (period.output * priceFor(lastModel).output) / 1e6 / period.cost > 0.1) recs.push('Output passa de 10% do custo: effortLevel alto gera muito raciocínio; use high/medium em tarefas rotineiras.')
+  const outputPrice = priceFor(lastModel)?.output
+  if (period.cost > 0 && outputPrice && (period.output * outputPrice) / 1e6 / period.cost > 0.1) recs.push('Output passa de 10% do custo: effortLevel alto gera muito raciocínio; use high/medium em tarefas rotineiras.')
   if (recs.length) out.push('', 'O que mais economiza no seu uso:', ...recs.map(r => `  • ${r}`))
   if (!period.calls) out.push('', 'Ainda não há chamadas registradas: o CATO registra o custo a partir da instalação.')
   return out.join('\n')
@@ -433,20 +451,24 @@ export const register: Register = (on, rawOptions) => {
     const ctx = contextTokens(usage as StepUsage)
     const cost = usageCost(usage.model, usage as StepUsage, options.cacheTtlMinutes)
     const written = usage.cache_creation_input_tokens ?? 0
-    const writeCost = (written * writePrice(usage.model)) / 1e6
+    const writeCost = (written * (writePrice(usage.model) ?? 0)) / 1e6
+    // A ordem importa: logo após compactar, a reescrita é esperada, mesmo que a pausa tenha passado do TTL
     const cause =
       written <= MISS_THRESHOLD ? null
-        : lastStepAt && now - lastStepAt > ttlMs ? 'idle'
-          : lastModel && lastModel !== usage.model ? 'model'
-            : 'other'
+        : compactedAt > lastStepAt ? 'rebuild'
+          : lastStepAt && now - lastStepAt > ttlMs ? 'idle'
+            : lastModel && lastModel !== usage.model ? 'model'
+              : 'other'
     await bumpDay($, day => {
       day.calls += 1
-      day.cost += cost
+      if (cost === null) day.unpriced += 1
+      else day.cost += cost
       day.read += usage.cache_read_input_tokens ?? 0
       day.write += written
-      day.output += usage.output_tokens
+      day.output += usage.output_tokens ?? 0
       day.ctxSum += ctx
       day.maxCtx = Math.max(day.maxCtx, ctx)
+      if (cause === 'rebuild') { day.rebuilds += 1; day.rebuildCost += writeCost }
       if (cause === 'idle') { day.missIdle += 1; day.missIdleCost += writeCost }
       if (cause === 'model') { day.missModel += 1; day.missModelCost += writeCost }
       if (cause === 'other') { day.missOther += 1; day.missOtherCost += writeCost }
@@ -497,9 +519,15 @@ export const register: Register = (on, rawOptions) => {
       const key = `idle:${lastStepAt}`
       if (!acks.has(key)) {
         acks.add(key)
-        const rewrite = (ctx * writePrice(model)) / 1e6
-        const compactCold = (ctx * price.write5m + COMPACT_SUMMARY_TOKENS * price.output) / 1e6
         const idleMin = Math.round((now - lastStepAt) / 60_000)
+        const write = writePrice(model)
+        // Modelo sem preço conhecido: avisa em tokens e nunca segura o prompt por um custo que não sabe calcular
+        if (!price || write === null) {
+          $.ui.toast(`CATO: cache expirado (${idleMin} min); este turno reescreve ${Math.round(ctx / 1000)}k tokens. /clear ou /compact saem mais barato.`)
+          return next(withPending())
+        }
+        const rewrite = (ctx * write) / 1e6
+        const compactCold = (ctx * price.write5m + COMPACT_SUMMARY_TOKENS * price.output) / 1e6
         const choices =
           `• /clear ≈ $0 — recomeça limpo (melhor se a próxima tarefa é outra)\n` +
           `• /compact ≈ ${usd(compactCold)} uma vez — o contexto cai para ~${COMPACT_SUMMARY_TOKENS / 1000}k`
@@ -522,7 +550,7 @@ export const register: Register = (on, rawOptions) => {
     if (band && !acks.has(`ctx:${band}`)) {
       acks.add(`ctx:${band}`)
       $.ui.toast(
-        `CATO: contexto em ${Math.round(ctx / 1000)}k tokens; cada turno relê tudo (≈ ${usd((ctx * price.read) / 1e6, 3)}/turno). ` +
+        `CATO: contexto em ${Math.round(ctx / 1000)}k tokens; cada turno relê tudo${price ? ` (≈ ${usd((ctx * price.read) / 1e6, 3)}/turno)` : ''}. ` +
           `/compact reduz para ~${COMPACT_SUMMARY_TOKENS / 1000}k; /clear se a próxima tarefa é outra.`,
       )
     }
@@ -530,23 +558,18 @@ export const register: Register = (on, rawOptions) => {
   }).catch(($, e, next) => next(e))
 
   // ---------------------------------------------------------------------------------------------------
-  // Compactação: guarda o estado do Git antes e o devolve ao modelo no próximo prompt
+  // Compactação: devolve ao modelo o `git diff --stat` (branch e status o Claude Code já relê sozinho).
+  // `precompute` só prepara um resumo para a próxima compactação: nada foi compactado ainda.
   // ---------------------------------------------------------------------------------------------------
   on('session.compact', async ($, e, next) => {
-    if (e.agentId) return next(e)
-    const [branch, status, diffStat] = await Promise.all([
-      git($, ['branch', '--show-current']),
-      git($, ['status', '--short']),
-      git($, ['diff', '--stat']),
-    ])
+    if (e.agentId || e.trigger === 'precompute') return next(e)
+    const diffStat = await git($, ['diff', '--stat'])
     const result = await next(e)
     if (!('skip' in result && result.skip)) {
       compactedAt = await $.clock.now()
       for (const key of [...acks]) if (key.startsWith('ctx:')) acks.delete(key)
-      if (branch || status) {
-        pendingContext =
-          `[CATO: estado do Git após a compactação — branch ${branch || 'desconhecida'}; não é preciso rodar git status de novo]\n` +
-          `${status.slice(0, 800) || '(working tree limpa)'}\n${diffStat.slice(0, 800)}`.trim()
+      if (diffStat) {
+        pendingContext = `[CATO: alterações ainda não commitadas após a compactação (git diff --stat)]\n${diffStat.slice(0, 800)}`
       }
       $.ui.status(undefined)
     }
