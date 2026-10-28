@@ -25,8 +25,12 @@ import {
   toolFamily,
 } from './lib/integrations.ts'
 import type { Graph } from './lib/integrations.ts'
-import { contextTokens, priceFor, sameModel, usageCost, usd } from './lib/pricing.ts'
+import { BAND_LABELS, contextBand, contextTokens, priceFor, sameModel, usageCost, usd } from './lib/pricing.ts'
 import type { StepUsage } from './lib/pricing.ts'
+import { addDay, dayKey, dayStart, emptyDay } from './lib/ledger.ts'
+import type { Day, Ledger } from './lib/ledger.ts'
+import { aggregate, AWK_EXTRACT, parseExtract, parseJsonlText, powershellExtract } from './lib/history.ts'
+import type { TranscriptEvent } from './lib/history.ts'
 
 type Options = {
   guard: boolean
@@ -59,39 +63,12 @@ const compactInstructions = (): string =>
 // Abaixo disso, trocar de modelo custa pouco e o aviso só atrapalharia
 const MODEL_SWITCH_MIN_CONTEXT = 50_000
 
-type Day = {
-  calls: number
-  cost: number
-  read: number
-  write: number
-  output: number
-  ctxSum: number
-  maxCtx: number
-  missIdle: number
-  missIdleCost: number
-  missModel: number
-  missModelCost: number
-  missOther: number
-  missOtherCost: number
-  // Primeira chamada depois de uma compactação: reescreve o cache por design, não é miss
-  rebuilds: number
-  rebuildCost: number
-  // Chamadas de modelo sem preço conhecido: contadas, mas fora do custo
-  unpriced: number
-  // Subagentes: custo à parte do da conversa principal (que segue em `cost`)
-  subCalls: number
-  subCost: number
-  subMisses: number
-  subMissCost: number
-  compressions: number
-  compressedTokens: number
-  blockedReads: number
-  guardHolds: number
-}
-
-type Ledger = { days: Record<string, Day> }
 
 const LEDGER_KEY = 'ledger'
+const HISTORY_KEY = 'history'
+// $.fs.read e a saída de $.process.run param aqui
+const FS_READ_LIMIT = 4 * 1024 * 1024
+const MAX_SEEN_IDS = 200_000
 const MISS_THRESHOLD = 100_000
 const IDLE_MIN_CONTEXT = 150_000
 const COMPACT_SUMMARY_TOKENS = 15_000
@@ -150,18 +127,6 @@ function touchAgent(agentId: string, change: (state: AgentCacheState) => void): 
     agentStates.delete(oldest)
   }
 }
-
-// Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h
-const dayKey = (ms: number): string => {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-const emptyDay = (): Day => ({
-  calls: 0, cost: 0, read: 0, write: 0, output: 0, ctxSum: 0, maxCtx: 0, missIdle: 0, missIdleCost: 0,
-  missModel: 0, missModelCost: 0, missOther: 0, missOtherCost: 0, rebuilds: 0, rebuildCost: 0, unpriced: 0,
-  subCalls: 0, subCost: 0, subMisses: 0, subMissCost: 0, compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0,
-})
 
 /** Preço por milhão de tokens da escrita de cache no TTL dado, ou null para modelo sem preço conhecido. */
 const writePrice = (model: string, ttlMinutes = options.cacheTtlMinutes): number | null => {
@@ -402,15 +367,14 @@ async function searchSandbox($: EngineInterface, id: string, query: string): Pro
 
 async function costReport($: EngineInterface, days: number): Promise<string> {
   const ledger = await loadLedger($)
+  const history = await loadHistory($)
   const now = await $.clock.now()
+  // O histórico importado só tem dias anteriores ao ledger ao vivo (liveSince), então somar não conta duas vezes
   const sum = (n: number): Day => {
     const total = emptyDay()
-    for (let i = 0; i < n; i++) {
-      const d = ledger.days[dayKey(now - i * 86_400_000)]
-      if (!d) continue
-      for (const k of Object.keys(total) as (keyof Day)[]) {
-        total[k] = k === 'maxCtx' ? Math.max(total[k], d[k] ?? 0) : total[k] + (d[k] ?? 0)
-      }
+    for (const key of lastDayKeys(now, n)) {
+      addDay(total, ledger.days[key])
+      addDay(total, history?.days[key])
     }
     return total
   }
@@ -438,8 +402,18 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     `Reconstruções esperadas após compactar (não são misses): ${period.rebuilds}x  ${usd(period.rebuildCost)}`,
     ...(period.subMisses ? [`Cache misses de subagentes: ${period.subMisses}x  ${usd(period.subMissCost)}`] : []),
     ...(period.unpriced ? [`${period.unpriced} chamadas de modelo sem preço conhecido ficaram fora do custo.`] : []),
+    ...(period.cost > 0
+      ? [
+          '',
+          `Custo da conversa principal por tamanho de contexto (${days} dias):`,
+          '  ' + BAND_LABELS.map((label, i) => {
+            const cost = period[`band${i as 0 | 1 | 2 | 3}`]
+            return `${label}: ${usd(cost)} (${Math.round((cost / period.cost) * 100)}%)`
+          }).join('  |  '),
+        ]
+      : []),
     '',
-    `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
+    `Intervenções:${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
       `${period.compressions} saídas comprimidas (≈ −${period.compressedTokens.toLocaleString('pt-BR')} tokens, estimativa por caracteres).`,
   ]
   const recs: string[] = []
@@ -451,8 +425,316 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
   if (period.subCost > 0 && period.subCost / (period.cost + period.subCost) > 0.3) {
     recs.push('Subagentes passam de 30% do custo: dê `model: haiku` ou `sonnet` aos de tarefas simples (busca, leitura, testes).')
   }
+  if (period.cost > 0 && period.band3 / period.cost > 0.3) {
+    recs.push('Mais de 30% do custo vem de turnos com contexto acima de 400k: /clear entre tarefas e /compact nas pausas naturais.')
+  }
   if (recs.length) out.push('', 'O que mais economiza no seu uso:', ...recs.map(r => `  • ${r}`))
-  if (!period.calls && !period.subCalls) out.push('', 'Ainda não há chamadas registradas: o CATO registra o custo a partir da instalação.')
+  if (history?.calls) {
+    out.push('', `Inclui ${history.calls} chamadas importadas dos transcripts (${dayKey(history.first)} a ${dayKey(history.last)}).`)
+  } else {
+    out.push('', 'Para incluir as sessões anteriores à instalação: /cato importar')
+  }
+  if (!period.calls && !period.subCalls) out.push('Ainda não há chamadas registradas no período.')
+  return out.join('\n')
+}
+
+// -------------------------------------------------------------------------------------------------------
+// Import do histórico (/cato importar): transcripts anteriores à instalação, sem contar nada duas vezes
+// -------------------------------------------------------------------------------------------------------
+type ImportedFile = { size: number; mtimeMs: number; status: 'done' | 'skipped' | 'failed'; calls: number; note?: string }
+
+type History = {
+  // Só entra o que veio antes disto: dali em diante o ledger ao vivo já contou
+  liveSince: number
+  days: Record<string, Day>
+  files: Record<string, ImportedFile>
+  // Hashes dos ids já importados (sessões retomadas repetem chamadas em outro arquivo)
+  seen: string[]
+  calls: number
+  first: number
+  last: number
+  // Arquivo em processamento; se ficar marcado, a execução anterior parou no meio dele
+  pending?: { path: string; size: number; mtimeMs: number }
+}
+
+async function loadHistory($: EngineInterface): Promise<History | null> {
+  const raw = await $.store.get(HISTORY_KEY)
+  return raw && typeof raw === 'object' && 'liveSince' in raw ? (raw as History) : null
+}
+
+/** Chaves dos últimos `n` dias (hoje incluso), andando pelo calendário local. */
+function lastDayKeys(now: number, n: number): string[] {
+  const d = new Date(now)
+  return Array.from({ length: n }, (_, i) => dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - i, 12).getTime()))
+}
+
+async function claudeConfigDir($: EngineInterface): Promise<string> {
+  const custom = await $.env.get('CLAUDE_CONFIG_DIR')
+  return (custom || `${await homeDir($)}/.claude`).replace(/\\/g, '/').replace(/\/$/, '')
+}
+
+type TranscriptFile = { path: string; size: number; mtimeMs: number; isSub: boolean }
+
+async function listTranscripts($: EngineInterface): Promise<TranscriptFile[]> {
+  const projects = `${await claudeConfigDir($)}/projects`
+  if (!(await $.fs.exists(projects).catch(() => false))) return []
+  const found: TranscriptFile[] = []
+  for (const project of await $.fs.list(projects)) {
+    if (project.kind !== 'dir') continue
+    const dir = `${projects}/${project.name}`
+    for (const entry of await $.fs.list(dir).catch(() => [])) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        found.push({ path: `${dir}/${entry.name}`, size: entry.size, mtimeMs: entry.mtimeMs, isSub: false })
+      } else if (entry.kind === 'dir') {
+        const subDir = `${dir}/${entry.name}/subagents`
+        for (const sub of await $.fs.list(subDir).catch(() => [])) {
+          if (sub.kind === 'file' && sub.name.endsWith('.jsonl')) {
+            found.push({ path: `${subDir}/${sub.name}`, size: sub.size, mtimeMs: sub.mtimeMs, isSub: true })
+          }
+        }
+      }
+    }
+  }
+  return found
+}
+
+type Extractor = 'awk' | 'powershell' | null
+
+async function findExtractor($: EngineInterface): Promise<Extractor> {
+  const probes: [Extractor, string[]][] = [
+    ['awk', ['awk', 'BEGIN { print "ok" }']],
+    ['powershell', ['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output ok']],
+  ]
+  for (const [name, argv] of probes) {
+    const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch(() => null)
+    if (r && r.exitCode === 0 && r.stdout.trim() === 'ok') return name
+  }
+  return null
+}
+
+async function readTranscript($: EngineInterface, file: TranscriptFile, extractor: Extractor): Promise<TranscriptEvent[] | string> {
+  if (extractor) {
+    const argv = extractor === 'awk'
+      ? ['awk', AWK_EXTRACT, file.path]
+      : ['powershell', '-NoProfile', '-NonInteractive', '-Command', powershellExtract(file.path)]
+    const r = await $.process.run(argv, { timeoutMs: 180_000 }).catch((error: Error) => error)
+    if (r instanceof Error) return `extrator falhou: ${r.message.slice(0, 120)}`
+    if (r.exitCode !== 0) return `extrator saiu com código ${r.exitCode}`
+    if (r.isStdoutTruncated) return 'extrato passou de 4 MiB'
+    return parseExtract(r.stdout)
+  }
+  if (file.size > FS_READ_LIMIT) return 'acima de 4 MiB e sem awk/PowerShell para extrair'
+  return parseJsonlText((await $.fs.read(file.path)) as string)
+}
+
+async function importHistory($: EngineInterface, remainingMs: () => number): Promise<string> {
+  const ledger = await loadLedger($)
+  const now = await $.clock.now()
+  const liveDays = Object.keys(ledger.days).sort()
+  const history: History = (await loadHistory($)) ?? {
+    liveSince: liveDays.length ? dayStart(liveDays[0]) : now,
+    days: {}, files: {}, seen: [], calls: 0, first: 0, last: 0,
+  }
+  if (history.pending) {
+    // A execução anterior parou no meio deste arquivo: não tenta de novo enquanto ele não mudar
+    const { path, size, mtimeMs } = history.pending
+    history.files[path] = { size, mtimeMs, status: 'failed', calls: history.files[path]?.calls ?? 0, note: 'interrompido no meio da leitura' }
+    delete history.pending
+  }
+
+  const files = await listTranscripts($)
+  // Arquivos novos ou que mudaram desde a última vez (os ids já vistos não contam de novo)
+  const todo = files.filter(f => {
+    const prev = history.files[f.path]
+    return !prev || prev.size !== f.size || prev.mtimeMs !== f.mtimeMs
+  })
+  const extractor = todo.length ? await findExtractor($) : null
+  const seen = new Set(history.seen)
+  let processed = 0
+  let added = 0
+  for (const file of todo) {
+    if (remainingMs() < 5_000) break
+    history.pending = { path: file.path, size: file.size, mtimeMs: file.mtimeMs }
+    await $.store.set(HISTORY_KEY, history)
+    const events = await readTranscript($, file, extractor).catch((error: Error) => `falha ao ler: ${error.message.slice(0, 120)}`)
+    if (typeof events === 'string') {
+      history.files[file.path] = { size: file.size, mtimeMs: file.mtimeMs, status: file.size > FS_READ_LIMIT && !extractor ? 'skipped' : 'failed', calls: 0, note: events }
+    } else {
+      const result = aggregate(events, {
+        mainTtlMinutes: options.cacheTtlMinutes >= 60 ? 60 : 5,
+        subTtlMinutes: subagentTtlMinutes(),
+        liveSince: history.liveSince,
+        isSubFile: file.isSub,
+      }, seen)
+      for (const [key, day] of Object.entries(result.days)) history.days[key] = addDay(history.days[key] ?? emptyDay(), day)
+      history.calls += result.calls
+      if (result.calls) {
+        history.first = history.first ? Math.min(history.first, result.first) : result.first
+        history.last = Math.max(history.last, result.last)
+      }
+      history.files[file.path] = { size: file.size, mtimeMs: file.mtimeMs, status: 'done', calls: (history.files[file.path]?.calls ?? 0) + result.calls }
+      added += result.calls
+    }
+    delete history.pending
+    history.seen = [...seen].slice(-MAX_SEEN_IDS)
+    await $.store.set(HISTORY_KEY, history)
+    processed += 1
+  }
+
+  const statuses = Object.values(history.files)
+  const failed = Object.entries(history.files).filter(([, f]) => f.status !== 'done')
+  const remaining = todo.length - processed
+  const out = [
+    `CATO — import do histórico: ${processed} arquivos lidos agora, ${added} chamadas novas ` +
+      `(total importado: ${history.calls} chamadas, ${statuses.filter(f => f.status === 'done').length} arquivos).`,
+    `Extrator: ${extractor ?? 'nenhum (só arquivos até 4 MiB)'}. Só entram chamadas anteriores a ${dayKey(history.liveSince)}; dali em diante o CATO já registrava ao vivo.`,
+  ]
+  if (history.calls) out.push(`Período importado: ${dayKey(history.first)} a ${dayKey(history.last)}.`)
+  if (remaining > 0) out.push(`Faltam ${remaining} arquivos (o tempo do comando acabou): rode /cato importar de novo para continuar.`)
+  if (failed.length) {
+    out.push(`${failed.length} arquivos ficaram de fora:`, ...failed.slice(0, 5).map(([path, f]) => `  • ${path.split('/').slice(-2).join('/')}: ${f.note ?? f.status}`))
+  }
+  out.push('Veja o resultado com /cato 30.')
+  return out.join('\n')
+}
+
+// -------------------------------------------------------------------------------------------------------
+// /cato doctor: diagnóstico só de leitura (integrações, conflitos, contexto fixo e cache)
+// -------------------------------------------------------------------------------------------------------
+type Json = Record<string, unknown>
+
+async function readJson($: EngineInterface, path: string): Promise<Json | null> {
+  try {
+    const value = JSON.parse((await $.fs.read(path)) as string) as unknown
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null
+  } catch {
+    return null
+  }
+}
+
+const objectKeys = (value: unknown): string[] => (value && typeof value === 'object' ? Object.keys(value as Json) : [])
+
+async function commandWorks($: EngineInterface, argv: string[], pattern: RegExp): Promise<boolean> {
+  const r = await $.process.run(argv, { timeoutMs: 5_000 }).catch(() => null)
+  return !!r && r.exitCode === 0 && pattern.test(r.stdout + r.stderr)
+}
+
+async function folderSize($: EngineInterface, dir: string): Promise<{ files: number; bytes: number }> {
+  const entries = await $.fs.list(dir).catch(() => [])
+  return entries.filter(e => e.kind === 'file').reduce((acc, e) => ({ files: acc.files + 1, bytes: acc.bytes + e.size }), { files: 0, bytes: 0 })
+}
+
+/** TTL pedido ao Claude Code ('5m' | '1h') em minutos, ou null se não foi escolhido explicitamente. */
+const ttlMinutes = (value: unknown): number | null => (value === '1h' ? 60 : value === '5m' ? 5 : null)
+
+async function doctor($: EngineInterface): Promise<string> {
+  const out: string[] = ['CATO — diagnóstico (só leitura: nada foi alterado)']
+  const section = (title: string) => out.push('', title)
+  const ok = (text: string) => out.push(`  ✅ ${text}`)
+  const info = (text: string) => out.push(`  • ${text}`)
+  const warn = (text: string) => out.push(`  ⚠ ${text}`)
+  const bad = (text: string) => out.push(`  ❌ ${text}`)
+
+  const home = await homeDir($)
+  const cfg = await claudeConfigDir($)
+  const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
+  // Ordem de precedência: usuário < projeto < local (o último que define vence)
+  const settings = (await Promise.all([
+    readJson($, `${cfg}/settings.json`),
+    readJson($, `${cwd}/.claude/settings.json`),
+    readJson($, `${cwd}/.claude/settings.local.json`),
+  ])).filter((s): s is Json => !!s)
+  const setting = (key: string): unknown => settings.reduce<unknown>((v, s) => (key in s ? s[key] : v), undefined)
+  // Variável de ambiente: a do processo ou a do bloco "env" das settings ($.env.get só aceita nome literal)
+  const envOr = (name: string, fromProcess: string | undefined): string => {
+    if (fromProcess) return fromProcess
+    const fromSettings = settings.reduce<unknown>((v, s) => ((s.env as Json | undefined)?.[name] ?? v), undefined)
+    return typeof fromSettings === 'string' ? fromSettings : ''
+  }
+  const claudeJson = (await readJson($, `${cfg}/.claude.json`)) ?? (await readJson($, `${home}/.claude.json`))
+  const projects = (claudeJson?.projects ?? {}) as Record<string, Json>
+  const projectEntry = projects[cwd] ?? projects[cwd.replace(/\//g, '\\')] ?? null
+  const mcpServers = [
+    ...objectKeys(claudeJson?.mcpServers),
+    ...objectKeys(projectEntry?.mcpServers),
+    ...objectKeys((await readJson($, `${cwd}/.mcp.json`))?.mcpServers),
+  ]
+  const plugins = settings.flatMap(s => objectKeys(s.enabledPlugins))
+
+  section('Conflitos')
+  const legacyHooks = /\bcato\b/i.test(JSON.stringify(settings.map(s => s.hooks ?? {})))
+  const legacyMcp = mcpServers.some(name => name.toLowerCase() === 'cato')
+  if (legacyHooks || legacyMcp) {
+    bad(
+      `A versão Python do CATO ainda está configurada (${[legacyHooks && 'hooks no settings.json', legacyMcp && 'servidor MCP "cato"'].filter(Boolean).join(' e ')}): ` +
+        'o CATO roda em dobro. Remova esses hooks e o servidor, ou restaure ~/.claude/settings.json.cato-backup.',
+    )
+  } else {
+    ok('Sem resto da versão Python (hooks ou servidor MCP "cato").')
+  }
+  const autoCompactEnv = envOr('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', await $.env.get('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'))
+  if (autoCompactEnv && options.autoCompactPercent > 0) {
+    warn(`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=${autoCompactEnv} e autoCompactPercent=${options.autoCompactPercent} do CATO: use um só.`)
+  }
+
+  section('Integrações')
+  ;(await commandWorks($, ['rtk', '--version'], /rtk/i)) ? ok('RTK instalado.') : info('RTK não encontrado (opcional).')
+  ;(await findAstGrep($)) ? ok('ast-grep instalado: mcp__cato__structural_search ativo.') : info('ast-grep não encontrado (opcional): structural_search fica indisponível.')
+  ;(await $.fs.exists(GRAPHIFY_JSON).catch(() => false)) ? ok('Grafo do Graphify neste projeto.') : info('Sem grafo do Graphify neste projeto (opcional).')
+  mcpServers.some(n => /serena/i.test(n)) ? ok('Serena MCP configurado.') : info('Serena MCP não configurado (opcional).')
+  mcpServers.some(n => /github/i.test(n)) || plugins.some(p => /github/i.test(p))
+    ? ok('GitHub MCP configurado.')
+    : info('GitHub MCP não configurado (opcional).')
+  if (options.pythonChecks) (await findPython($)) ? ok('Python encontrado: checagem de sintaxe de .py ativa.') : info('Python não encontrado: só JSON é checado após edições.')
+
+  section('Contexto fixo (entra em toda chamada)')
+  for (const path of [`${cwd}/CLAUDE.md`, `${cwd}/.claude/CLAUDE.md`, `${cfg}/CLAUDE.md`]) {
+    const text = await $.fs.read(path).catch(() => null)
+    if (typeof text !== 'string') continue
+    const lines = text.split('\n').length
+    const label = path.startsWith(cfg) ? '~/.claude/CLAUDE.md' : path.slice(cwd.length + 1)
+    lines > 200
+      ? warn(`${label}: ${lines} linhas (a documentação recomenda menos de 200; instruções de fluxos específicos rendem mais como skills).`)
+      : ok(`${label}: ${lines} linhas.`)
+  }
+  mcpServers.length > 10
+    ? warn(`${mcpServers.length} servidores MCP configurados: desative em /mcp os que não usa (CLI como gh custa menos contexto).`)
+    : info(`${mcpServers.length} servidores MCP configurados.`)
+  if (envOr('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS', await $.env.get('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'))) {
+    warn('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS está definido: desliga o tool search (ferramentas MCP entram inteiras no contexto).')
+  }
+
+  section('Cache')
+  const model = String(setting('model') ?? '')
+  if (/opusplan/i.test(model)) warn('model=opusplan: cada entrada e saída do plan mode troca de modelo e relê a conversa sem cache.')
+  const mainTtl = (envOr('FORCE_PROMPT_CACHING_5M', await $.env.get('FORCE_PROMPT_CACHING_5M'))) === '1' ? 5
+    : ttlMinutes(envOr('CLAUDE_CODE_PROMPT_CACHE_TTL', await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'))) ?? ttlMinutes(setting('promptCacheTtl'))
+  const catoMain = options.cacheTtlMinutes >= 60 ? 60 : 5
+  if (mainTtl === null) info(`TTL da conversa principal no padrão do Claude Code (1h na assinatura, 5 min com chave de API); o CATO usa ${catoMain} min.`)
+  else if (mainTtl !== catoMain) warn(`O Claude Code usa ${mainTtl} min de cache na conversa principal e o CATO calcula com ${catoMain}: ajuste cacheTtlMinutes.`)
+  else ok(`TTL da conversa principal: ${mainTtl} min, igual ao do CATO.`)
+  const subTtl = ttlMinutes(envOr('CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL', await $.env.get('CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL'))) ?? ttlMinutes(setting('subagentPromptCacheTtl')) ?? 5
+  const catoSub = subagentTtlMinutes() >= 60 ? 60 : 5
+  subTtl !== catoSub
+    ? warn(`Subagentes usam ${subTtl} min de cache no Claude Code e o CATO calcula com ${catoSub}: ajuste subagentCacheTtlMinutes.`)
+    : ok(`TTL dos subagentes: ${subTtl} min, igual ao do CATO.`)
+  info(`Compactação de conversas paradas (idleCompaction): ${setting('idleCompaction') === false ? 'desligada' : 'ligada (padrão)'}.`)
+
+  section('Dados do CATO')
+  for (const [label, dir] of [['sandboxes MCP', `${home}/.cato/sandbox`], ['logs brutos', `${home}/.cato/logs`]] as const) {
+    const { files, bytes } = await folderSize($, dir)
+    info(`${label}: ${files} arquivos, ${(bytes / 1e6).toFixed(1)} MB (apagados após ${RAW_FILE_DAYS} dias).`)
+  }
+  const history = await loadHistory($)
+  info(history?.calls
+    ? `Histórico importado: ${history.calls} chamadas (${dayKey(history.first)} a ${dayKey(history.last)}).`
+    : 'Histórico ainda não importado: /cato importar.')
+
+  section('Opções ativas')
+  for (const [key, value] of Object.entries(options ?? {})) {
+    const shown = typeof value === 'string' && value.length > 60 ? `${value.slice(0, 57)}...` : JSON.stringify(value)
+    info(`${key} = ${shown}`)
+  }
   return out.join('\n')
 }
 
@@ -545,6 +827,7 @@ export const register: Register = (on, rawOptions) => {
       day.output += usage.output_tokens ?? 0
       day.ctxSum += ctx
       day.maxCtx = Math.max(day.maxCtx, ctx)
+      if (cost !== null) day[`band${contextBand(ctx)}`] += cost
       if (cause === 'rebuild') { day.rebuilds += 1; day.rebuildCost += writeCost }
       if (cause === 'idle') { day.missIdle += 1; day.missIdleCost += writeCost }
       if (cause === 'model') { day.missModel += 1; day.missModelCost += writeCost }
@@ -921,14 +1204,25 @@ export const register: Register = (on, rawOptions) => {
       description: 'Custo real registrado pelo CATO (por chamada de API): hoje, 7 e 30 dias, contexto médio, cache misses por causa e recomendações.',
       inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
     })
-    await $.command.register({ name: 'cato', description: 'CATO: custo real, cache misses e o que mais economiza no seu uso', argumentHint: '[dias]' })
+    await $.command.register({
+      name: 'cato',
+      description: 'CATO: custo real, cache misses e o que mais economiza no seu uso (importar: sessões anteriores; doctor: diagnóstico)',
+      argumentHint: '[dias | importar | doctor]',
+    })
     await cleanupOldFiles($)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   const days = (value: unknown): number => Math.max(1, Math.min(LEDGER_DAYS, Number(value) || 30))
 
-  on('command.run', { command: 'cato' }, async ($, e) => ({ text: await costReport($, days(String(e.args).trim())) }))
+  on('command.run', { command: 'cato' }, async ($, e, next) => {
+    const arg = String(e.args ?? '').trim().toLowerCase()
+    if (arg === 'importar' || arg === 'import') {
+      return { text: await importHistory($, () => next.budget.remainingMs) }
+    }
+    if (arg === 'doctor') return { text: await doctor($) }
+    return { text: await costReport($, days(arg)) }
+  })
 
   on('tool.call', { tool: 'mcp__cato__cost_report' }, async ($, e) => ({
     result: await costReport($, days((e as unknown as { days?: number }).days)),
