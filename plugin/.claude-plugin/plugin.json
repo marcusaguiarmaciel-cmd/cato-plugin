@@ -1,8 +1,8 @@
 {
   "name": "cato",
-  "displayName": "CATO — Claude Adaptive Token Optimizer",
-  "version": "1.1.0",
-  "description": "Economia de tokens medida, sem Python: guard de contexto e cache, bloqueio de leituras pesadas, autocompactação, status de custo, compressão de saídas ruidosas e ferramentas de navegação de código.",
+  "displayName": "CATO: Claude Adaptive Token Optimizer",
+  "version": "1.1.1",
+  "description": "Reduz o custo de tokens do Claude Code com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente, com integração a Serena, Graphify, ast-grep e GitHub MCP.",
   "author": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
   "homepage": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
   "repository": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",

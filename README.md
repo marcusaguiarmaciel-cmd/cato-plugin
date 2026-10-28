@@ -1,6 +1,6 @@
-# CATO — plugin para Claude Code (sem Python)
+# CATO: Claude Adaptive Token Optimizer
 
-Economia de tokens medida, rodando dentro do Claude Code como mod: sem Python e sem processo por hook.
+Plugin para o Claude Code que reduz o custo de tokens com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente. Roda inteiramente dentro do Claude Code, sem Python e sem processos externos por hook, e se integra a Serena, Graphify, ast-grep e GitHub MCP.
 
 ## Instalação
 

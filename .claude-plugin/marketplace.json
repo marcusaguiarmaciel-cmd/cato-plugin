@@ -5,7 +5,10 @@
     {
       "name": "cato",
       "source": "./plugin",
-      "description": "Economia de tokens medida, sem Python: guard de contexto e cache, autocompactação, status de custo, compressão de saídas ruidosas e navegação de código."
+      "description": "Reduz o custo de tokens do Claude Code com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente, com integração a Serena, Graphify, ast-grep e GitHub MCP."
     }
-  ]
+  ],
+  "metadata": {
+    "description": "Plugins de otimização de custo e de contexto para o Claude Code."
+  }
 }
