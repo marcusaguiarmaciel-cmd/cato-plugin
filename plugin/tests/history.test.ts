@@ -68,12 +68,12 @@ test('aggregate: reconstrução após compactar, pausa longa, faixa de contexto,
 const norm = (p: unknown) => String(p).replace(/\\/g, '/')
 
 /** Um ~/.claude com um projeto, uma sessão e um subagente, lidos pelo extrator (awk simulado). */
-function claudeHome(on: On, written: string[], store: Record<string, unknown> = {}) {
+function claudeHome(on: On, written: string[], store: Record<string, unknown> = {}, awk = 'awk', abort = false) {
   mock.store(on, store)
   mock.clock(on, { now: Date.UTC(2026, 9, 28, 15) })
   mock.env(on, { USERPROFILE: 'C:\\Users\\t' })
   const root = 'C:/Users/t/.claude/projects'
-  on('fs.exists', (_, e) => ({ value: norm(e.path).startsWith(root) }))
+  on('fs.exists', (_, e) => ({ value: norm(e.path).startsWith(root) || norm(e.path) === awk }))
   on('fs.list', (_, e) => {
     const path = norm(e.path)
     if (path === root) return { value: [{ name: 'proj', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }
@@ -95,12 +95,14 @@ function claudeHome(on: On, written: string[], store: Record<string, unknown> = 
   on('process.run', (_, e) => {
     const argv = e.argv
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv[0] === 'awk' && argv[1].includes('BEGIN')) return ok('ok\n')
-    if (argv[0] === 'awk' && norm(argv[2]).endsWith('s1.jsonl')) {
+    if (argv[0] === 'git' && argv[1] === '--exec-path') return ok('C:/Program Files/Git/mingw64/libexec/git-core\n')
+    if (norm(argv[0]) !== awk) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (argv[1].includes('BEGIN')) return ok('ok\n')
+    if (abort) return { deny: 'cato: $.process.run(awk) aborted' }
+    if (norm(argv[2]).endsWith('s1.jsonl')) {
       return ok([tsv('msg_1', '2026-10-20T10:00:00Z', 5_000, 100_000, 100), tsv('msg_2', '2026-10-21T10:00:00Z', 0, 120_000, 100)].join('\n'))
     }
-    if (argv[0] === 'awk') return ok(tsv('msg_3', '2026-10-21T11:00:00Z', 0, 0, 10).replace('\t0\t10\t', '\t1\t10\t'))
-    return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return ok(tsv('msg_3', '2026-10-21T11:00:00Z', 0, 0, 10).replace('\t0\t10\t', '\t1\t10\t'))
   })
 }
 
@@ -118,18 +120,34 @@ test('/cato importar: arquivos grandes pelo extrator, subagentes à parte, e rod
   expect(written).toHaveLength(0)
 })
 
-test('/cato importar: arquivo em que a execução anterior parou fica de fora até mudar', async ($, on) => {
-  const written: string[] = []
-  const big = 'C:/Users/t/.claude/projects/proj/s1.jsonl'
-  claudeHome(on, written, {
-    history: {
-      liveSince: Date.UTC(2026, 9, 28), days: {}, files: {}, seen: [], calls: 0, first: 0, last: 0,
-      pending: { path: big, size: 200 * 1024 * 1024, mtimeMs: 1 },
-    },
-  })
+const BIG = 'C:/Users/t/.claude/projects/proj/s1.jsonl'
+const GIT_AWK = 'C:/Program Files/Git/usr/bin/awk.exe'
+const emptyHistory = (extra: Record<string, unknown>) => ({
+  history: { liveSince: Date.UTC(2026, 9, 28), days: {}, files: {}, seen: [], calls: 0, first: 0, last: 0, ...extra },
+})
+
+test('/cato importar: arquivo em que a execução anterior parou com o mesmo extrator fica de fora até mudar', async ($, on) => {
+  claudeHome(on, [], emptyHistory({ pending: { path: BIG, size: 200 * 1024 * 1024, mtimeMs: 1, extractor: 'awk' } }))
   const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
   expect(text).toContain('1 arquivos lidos agora, 1 chamadas novas')
   expect(text).toContain('interrompido no meio da leitura')
+})
+
+test('/cato importar: sem awk no PATH usa o do Git, e o que falhou com o PowerShell é lido de novo', async ($, on) => {
+  const failed = { size: 200 * 1024 * 1024, mtimeMs: 1, status: 'failed', calls: 0, note: 'extrator falhou: cato: $.process.run(powershell) aborted' }
+  claudeHome(on, [], emptyHistory({ files: { [BIG]: failed } }), GIT_AWK)
+  const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
+  expect(text).toContain(`Extrator: awk (${GIT_AWK})`)
+  expect(text).toContain('2 arquivos lidos agora, 3 chamadas novas')
+  expect(text).not.toContain('ficaram de fora')
+})
+
+test('/cato importar: leitura interrompida não marca o arquivo como falha', async ($, on) => {
+  claudeHome(on, [], {}, 'awk', true)
+  const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
+  expect(text).toContain('A leitura foi interrompida; faltam 2 arquivos')
+  expect(text).not.toContain('ficaram de fora')
+  expect(String(((await $.command.run(CMD('importar'))) as { text?: string }).text)).toContain('faltam 2 arquivos')
 })
 
 test('/cato doctor: aponta resto da versão Python e opusplan, e não escreve nada', async ($, on) => {

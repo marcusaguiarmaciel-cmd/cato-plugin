@@ -25,8 +25,12 @@ test('readGuard: Read inteiro de arquivo grande recebe o esqueleto; a segunda te
   const first = await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })
   expect(String(first.deny)).toContain('[CATO] src/big.ts tem')
   expect(String(first.deny)).toMatch(/\[L1-L100\] export function f0\(\) \{/)
+  const report = async () => String(((await $.command.run(CMD(''))) as { text?: string }).text)
+  // Desvio: credita o arquivo menos o esqueleto; pedido de novo: desconta o arquivo (fica só o custo do esqueleto)
+  expect(await report()).toMatch(/leituras grandes trocadas pelo esqueleto\s+1x\s+\d+k tokens/)
   const second = await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })
   expect(second.deny).toBeUndefined()
+  expect(await report()).toMatch(/leituras grandes trocadas pelo esqueleto\s+1x\s+−\d+ tokens\s+\(1 pedidas de novo e descontadas\)/)
   // Com offset/limit, arquivo pequeno ou fora do projeto, nada muda
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/other-big.ts', offset: 1, limit: 50 })).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/small.ts' })).deny).toBeUndefined()
@@ -81,6 +85,10 @@ test('maskColdCompact: com cache quente a compactação recebe as mensagens inta
   await clock.advance(2 * 60 * 60_000) // 2h parado: cache de 1h expirou
   await $.session.compact({ trigger: 'manual', messages })
   expect(seen).toEqual([0, 5])
+  // 5 resultados de 5.000 caracteres viraram uma linha cada: ≈ 6k tokens a menos no resumo
+  const report = String(((await $.command.run(CMD(''))) as { text?: string }).text)
+  expect(report).toMatch(/resultados antigos mascarados antes do resumo\s+1x\s+6k tokens/)
+  expect(report).toMatch(/total: 6k tokens a menos no contexto ≈ \$0\.05/)
 })
 
 const CMD = (args: string) => ({ command: 'cato', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })

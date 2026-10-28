@@ -36,6 +36,13 @@ export type Day = {
   // Esqueleto em leitura grande (opção readGuard): negadas e segundas tentativas liberadas
   readGuardDenies: number
   readGuardBypass: number
+  // Tokens que deixaram de entrar no contexto (estimativa por caracteres), por intervenção
+  blockedTokens: number
+  readGuardTokens: number
+  sandboxed: number
+  sandboxTokens: number
+  masks: number
+  maskedTokens: number
 }
 
 export type Ledger = { days: Record<string, Day> }
@@ -45,6 +52,7 @@ export const emptyDay = (): Day => ({
   missModel: 0, missModelCost: 0, missOther: 0, missOtherCost: 0, rebuilds: 0, rebuildCost: 0, unpriced: 0,
   subCalls: 0, subCost: 0, subMisses: 0, subMissCost: 0, band0: 0, band1: 0, band2: 0, band3: 0,
   compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0, readGuardDenies: 0, readGuardBypass: 0,
+  blockedTokens: 0, readGuardTokens: 0, sandboxed: 0, sandboxTokens: 0, masks: 0, maskedTokens: 0,
 })
 
 // Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h

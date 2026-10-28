@@ -98,3 +98,12 @@ export function contextBand(tokens: number): 0 | 1 | 2 | 3 {
 export const BAND_LABELS = ['< 100k', '100–250k', '250–400k', '> 400k'] as const
 
 export const usd = (value: number, digits = 2): string => `$${value.toFixed(digits)}`
+
+/** Contagem de tokens curta, em pt-BR: 850, 45k, 12,3M. */
+export const tokenCount = (value: number): string => {
+  const n = Math.abs(value)
+  const sign = value < 0 ? '−' : ''
+  if (n >= 1e6) return `${sign}${(n / 1e6).toFixed(1).replace('.', ',')}M`
+  if (n >= 1e3) return `${sign}${Math.round(n / 1e3)}k`
+  return `${sign}${Math.round(n)}`
+}

@@ -25,7 +25,7 @@ import {
   toolFamily,
 } from './lib/integrations.ts'
 import type { Graph } from './lib/integrations.ts'
-import { BAND_LABELS, contextBand, contextTokens, priceFor, sameModel, usageCost, usd } from './lib/pricing.ts'
+import { BAND_LABELS, contextBand, contextTokens, priceFor, sameModel, tokenCount, usageCost, usd } from './lib/pricing.ts'
 import type { StepUsage } from './lib/pricing.ts'
 import { addDay, dayKey, dayStart, emptyDay } from './lib/ledger.ts'
 import type { Day, Ledger } from './lib/ledger.ts'
@@ -77,6 +77,9 @@ const READ_GUARD_BYTES = 60_000
 // maskColdCompact: resultados de ferramenta fora das últimas trocas e acima disto viram uma linha
 const MASK_KEEP_EXCHANGES = 10
 const MASK_MIN_CHARS = 2_000
+// O Read do Claude Code recusa mais que isto sem offset/limit: a economia de uma leitura evitada não passa daqui
+const READ_MAX_TOKENS = 25_000
+const readTokens = (bytes: number): number => Math.min(READ_MAX_TOKENS, Math.floor(bytes / 3.8))
 const MISS_THRESHOLD = 100_000
 const IDLE_MIN_CONTEXT = 150_000
 const COMPACT_SUMMARY_TOKENS = 15_000
@@ -118,6 +121,8 @@ let python: string | null | undefined
 let astGrep: string | null | undefined
 let graphCache: { mtimeMs: number; graph: Graph | null } | null = null
 const acks = new Set<string>()
+// readGuard: tokens creditados em cada desvio, descontados se o arquivo inteiro for pedido de novo
+const readGuardCredit = new Map<string, number>()
 // Estado de cache de cada subagente, separado do da conversa principal (o guard só olha a principal)
 type AgentCacheState = { lastAt: number; lastModel: string; compactedAt: number }
 const agentStates = new Map<string, AgentCacheState>()
@@ -387,9 +392,23 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     return total
   }
   const line = (label: string, d: Day) =>
-    `  ${label.padEnd(9)} ${usd(d.cost).padStart(10)}  ${String(d.calls).padStart(6)} chamadas  ` +
+    `  ${label.padEnd(9)} ${usd(d.cost).padStart(10)}  ${String(d.calls).padStart(6)} chamadas  ${tokenCount(d.read + d.write + d.output).padStart(7)} tokens  ` +
     `contexto médio ${d.calls ? Math.round(d.ctxSum / d.calls / 1000) : 0}k  máx ${Math.round(d.maxCtx / 1000)}k`
   const period = sum(days)
+  // Cada token poupado entraria no contexto como escrita de cache; nos turnos seguintes ainda seria relido
+  const price = priceFor(lastModel) ?? priceFor('opus')!
+  const writePrice = options.cacheTtlMinutes >= 60 ? price.write1h : price.write5m
+  const savings: [string, number, number, string?][] = [
+    ['saídas de comandos comprimidas', period.compressions, period.compressedTokens],
+    ['respostas MCP guardadas no sandbox', period.sandboxed, period.sandboxTokens],
+    ['leituras pesadas negadas', period.blockedReads, period.blockedTokens, 'Grep/Glob negados contam sem tokens'],
+    ['leituras grandes trocadas pelo esqueleto', period.readGuardDenies, period.readGuardTokens, `${period.readGuardBypass} pedidas de novo e descontadas`],
+    ['resultados antigos mascarados antes do resumo', period.masks, period.maskedTokens],
+  ]
+  const savedTokens = savings.reduce((n, [, , tokens]) => n + tokens, 0)
+  const savingsLines = savings
+    .filter(([, count]) => count > 0)
+    .map(([label, count, tokens, note]) => `  ${label.padEnd(46)} ${`${count}x`.padStart(6)}  ${tokenCount(tokens).padStart(7)} tokens${note ? `  (${note})` : ''}`)
   const out = [
     'CATO — custo real registrado (preço oficial × tokens faturados de cada chamada)',
     line('hoje', sum(1)),
@@ -421,11 +440,15 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
         ]
       : []),
     '',
-    `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
-      `${period.compressions} saídas comprimidas (≈ −${period.compressedTokens.toLocaleString('pt-BR')} tokens, estimativa por caracteres).`,
-    ...(period.readGuardDenies
-      ? [`Esqueleto em leitura grande: ${period.readGuardDenies} leituras desviadas, ${period.readGuardBypass} liberadas na segunda tentativa.`]
-      : []),
+    `Tokens economizados pelo CATO (${days} dias, estimativa por caracteres):`,
+    ...(savingsLines.length
+      ? [
+          ...savingsLines,
+          `  total: ${tokenCount(savedTokens)} tokens a menos no contexto ≈ ${usd((savedTokens * writePrice) / 1e6)} na entrada ` +
+            `(cada turno seguinte também deixa de reler esses tokens, então a economia real é maior)`,
+        ]
+      : ['  nenhuma intervenção no período']),
+    ...(period.guardHolds ? [`Prompts segurados com o cache frio (para você decidir entre continuar, /compact ou /clear): ${period.guardHolds}`] : []),
   ]
   const recs: string[] = []
   if (period.cost > 0 && period.missIdleCost / period.cost > 0.03) recs.push('Ao voltar de uma pausa longa, use /clear ou /compact em vez de continuar com contexto grande.')
@@ -455,7 +478,8 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
 // -------------------------------------------------------------------------------------------------------
 // Import do histórico (/cato importar): transcripts anteriores à instalação, sem contar nada duas vezes
 // -------------------------------------------------------------------------------------------------------
-type ImportedFile = { size: number; mtimeMs: number; status: 'done' | 'skipped' | 'failed'; calls: number; note?: string }
+// `extractor`: com qual extrator falhou; com outro disponível, o arquivo é tentado de novo
+type ImportedFile = { size: number; mtimeMs: number; status: 'done' | 'skipped' | 'failed'; calls: number; note?: string; extractor?: string }
 
 type History = {
   // Só entra o que veio antes disto: dali em diante o ledger ao vivo já contou
@@ -468,7 +492,7 @@ type History = {
   first: number
   last: number
   // Arquivo em processamento; se ficar marcado, a execução anterior parou no meio dele
-  pending?: { path: string; size: number; mtimeMs: number }
+  pending?: { path: string; size: number; mtimeMs: number; extractor?: string }
 }
 
 async function loadHistory($: EngineInterface): Promise<History | null> {
@@ -512,25 +536,43 @@ async function listTranscripts($: EngineInterface): Promise<TranscriptFile[]> {
   return found
 }
 
-type Extractor = 'awk' | 'powershell' | null
+type Extractor = { kind: 'awk' | 'powershell'; bin: string } | null
+
+/** Onde fica o awk que vem com o Git for Windows (o PATH do app costuma ter só o `Git/cmd`). */
+async function gitAwkCandidates($: EngineInterface): Promise<string[]> {
+  const found: string[] = []
+  const r = await $.process.run(['git', '--exec-path'], { timeoutMs: 5_000 }).catch(() => null)
+  // C:/Program Files/Git/mingw64/libexec/git-core -> C:/Program Files/Git/usr/bin/awk.exe
+  const root = r?.exitCode === 0 ? r.stdout.trim().replace(/\\/g, '/').match(/^(.*)\/mingw(?:32|64)\/libexec\/git-core$/i)?.[1] : null
+  if (root) found.push(`${root}/usr/bin/awk.exe`)
+  for (const base of [await $.env.get('ProgramFiles'), await $.env.get('LOCALAPPDATA')]) {
+    if (base) found.push(`${base.replace(/\\/g, '/')}${/local$/i.test(base) ? '/Programs' : ''}/Git/usr/bin/awk.exe`)
+  }
+  return [...new Set(found)]
+}
 
 async function findExtractor($: EngineInterface): Promise<Extractor> {
-  const probes: [Extractor, string[]][] = [
-    ['awk', ['awk', 'BEGIN { print "ok" }']],
-    ['powershell', ['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output ok']],
-  ]
-  for (const [name, argv] of probes) {
+  const works = async (argv: string[]) => {
     const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch(() => null)
-    if (r && r.exitCode === 0 && r.stdout.trim() === 'ok') return name
+    return !!r && r.exitCode === 0 && r.stdout.trim() === 'ok'
   }
+  // awk é ~10x mais rápido que o PowerShell nos arquivos grandes
+  for (const bin of ['awk', ...(await gitAwkCandidates($))]) {
+    if (bin !== 'awk' && !(await $.fs.exists(bin).catch(() => false))) continue
+    if (await works([bin, 'BEGIN { print "ok" }'])) return { kind: 'awk', bin }
+  }
+  if (await works(['powershell', '-NoProfile', '-NonInteractive', '-Command', 'Write-Output ok'])) return { kind: 'powershell', bin: 'powershell' }
   return null
 }
 
+// Falha que não diz nada sobre o arquivo (interrompido, tempo esgotado): tenta de novo na próxima vez
+const TRANSIENT_RE = /abort|timed? ?out|timeout|cancel/i
+
 async function readTranscript($: EngineInterface, file: TranscriptFile, extractor: Extractor): Promise<TranscriptEvent[] | string> {
   if (extractor) {
-    const argv = extractor === 'awk'
-      ? ['awk', AWK_EXTRACT, file.path]
-      : ['powershell', '-NoProfile', '-NonInteractive', '-Command', powershellExtract(file.path)]
+    const argv = extractor.kind === 'awk'
+      ? [extractor.bin, AWK_EXTRACT, file.path]
+      : [extractor.bin, '-NoProfile', '-NonInteractive', '-Command', powershellExtract(file.path)]
     const r = await $.process.run(argv, { timeoutMs: 180_000 }).catch((error: Error) => error)
     if (r instanceof Error) return `extrator falhou: ${r.message.slice(0, 120)}`
     if (r.exitCode !== 0) return `extrator saiu com código ${r.exitCode}`
@@ -551,28 +593,42 @@ async function importHistory($: EngineInterface, remainingMs: () => number): Pro
   }
   if (history.pending) {
     // A execução anterior parou no meio deste arquivo: não tenta de novo enquanto ele não mudar
-    const { path, size, mtimeMs } = history.pending
-    history.files[path] = { size, mtimeMs, status: 'failed', calls: history.files[path]?.calls ?? 0, note: 'interrompido no meio da leitura' }
+    const { path, size, mtimeMs, extractor } = history.pending
+    history.files[path] = {
+      size, mtimeMs, status: 'failed', calls: history.files[path]?.calls ?? 0, note: 'interrompido no meio da leitura', extractor: extractor ?? 'fs',
+    }
     delete history.pending
   }
 
   const files = await listTranscripts($)
-  // Arquivos novos ou que mudaram desde a última vez (os ids já vistos não contam de novo)
+  const extractor = files.length ? await findExtractor($) : null
+  const extractorName = extractor?.kind ?? 'fs'
+  // Arquivos novos, que mudaram desde a última vez, ou que falharam com outro extrator (os ids já vistos não contam de novo)
   const todo = files.filter(f => {
     const prev = history.files[f.path]
-    return !prev || prev.size !== f.size || prev.mtimeMs !== f.mtimeMs
+    if (!prev || prev.size !== f.size || prev.mtimeMs !== f.mtimeMs) return true
+    return prev.status !== 'done' && prev.extractor !== extractorName
   })
-  const extractor = todo.length ? await findExtractor($) : null
   const seen = new Set(history.seen)
   let processed = 0
   let added = 0
+  let interrupted = 0
   for (const file of todo) {
     if (remainingMs() < 5_000) break
-    history.pending = { path: file.path, size: file.size, mtimeMs: file.mtimeMs }
+    history.pending = { path: file.path, size: file.size, mtimeMs: file.mtimeMs, extractor: extractorName }
     await $.store.set(HISTORY_KEY, history)
     const events = await readTranscript($, file, extractor).catch((error: Error) => `falha ao ler: ${error.message.slice(0, 120)}`)
+    if (typeof events === 'string' && TRANSIENT_RE.test(events)) {
+      // Não marca o arquivo: a próxima execução tenta de novo. As chamadas seguintes também seriam cortadas.
+      delete history.pending
+      await $.store.set(HISTORY_KEY, history)
+      interrupted = todo.length - processed
+      break
+    }
     if (typeof events === 'string') {
-      history.files[file.path] = { size: file.size, mtimeMs: file.mtimeMs, status: file.size > FS_READ_LIMIT && !extractor ? 'skipped' : 'failed', calls: 0, note: events }
+      history.files[file.path] = {
+        size: file.size, mtimeMs: file.mtimeMs, status: file.size > FS_READ_LIMIT && !extractor ? 'skipped' : 'failed', calls: 0, note: events, extractor: extractorName,
+      }
     } else {
       const result = aggregate(events, {
         mainTtlMinutes: options.cacheTtlMinutes >= 60 ? 60 : 5,
@@ -598,13 +654,18 @@ async function importHistory($: EngineInterface, remainingMs: () => number): Pro
   const statuses = Object.values(history.files)
   const failed = Object.entries(history.files).filter(([, f]) => f.status !== 'done')
   const remaining = todo.length - processed
+  const extractorLabel = !extractor ? 'nenhum (só arquivos até 4 MiB)' : extractor.bin === 'awk' || extractor.kind === 'powershell' ? extractor.kind : `awk (${extractor.bin})`
   const out = [
     `CATO — import do histórico: ${processed} arquivos lidos agora, ${added} chamadas novas ` +
       `(total importado: ${history.calls} chamadas, ${statuses.filter(f => f.status === 'done').length} arquivos).`,
-    `Extrator: ${extractor ?? 'nenhum (só arquivos até 4 MiB)'}. Só entram chamadas anteriores a ${dayKey(history.liveSince)}; dali em diante o CATO já registrava ao vivo.`,
+    `Extrator: ${extractorLabel}. Só entram chamadas anteriores a ${dayKey(history.liveSince)}; dali em diante o CATO já registrava ao vivo.`,
   ]
   if (history.calls) out.push(`Período importado: ${dayKey(history.first)} a ${dayKey(history.last)}.`)
-  if (remaining > 0) out.push(`Faltam ${remaining} arquivos (o tempo do comando acabou): rode /cato importar de novo para continuar.`)
+  if (interrupted > 0) {
+    out.push(`A leitura foi interrompida; faltam ${interrupted} arquivos, que não foram marcados como falha: rode /cato-importar de novo para continuar.`)
+  } else if (remaining > 0) {
+    out.push(`Faltam ${remaining} arquivos (o tempo do comando acabou): rode /cato-importar de novo para continuar.`)
+  }
   if (failed.length) {
     out.push(`${failed.length} arquivos ficaram de fora:`, ...failed.slice(0, 5).map(([path, f]) => `  • ${path.split('/').slice(-2).join('/')}: ${f.note ?? f.status}`))
   }
@@ -1026,7 +1087,15 @@ export const register: Register = (on, rawOptions) => {
     let toSummarize = call
     if (lastStepAt && (await $.clock.now()) - lastStepAt > ttlMs && (await experimentalFlags($)).maskColdCompact) {
       const masked = maskOldToolResults(call.messages, MASK_KEEP_EXCHANGES, MASK_MIN_CHARS)
-      if (masked.masked) toSummarize = { ...call, messages: masked.messages }
+      if (masked.masked) {
+        toSummarize = { ...call, messages: masked.messages }
+        const chars = (messages: readonly { readonly toolResults?: readonly { readonly text: string }[] }[]) => messages.reduce((n, m) => n + (m.toolResults ?? []).reduce((k, r) => k + r.text.length, 0), 0)
+        const saved = Math.floor((chars(call.messages) - chars(masked.messages)) / 3.8)
+        await bumpDay($, day => {
+          day.masks += 1
+          day.maskedTokens += Math.max(0, saved)
+        })
+      }
     }
     const result = await next(toSummarize)
     if (!('skip' in result && result.skip)) {
@@ -1050,7 +1119,12 @@ export const register: Register = (on, rawOptions) => {
       const target = String(input.file_path ?? input.path ?? '')
       const reason = target ? heavyReason(target) : null
       if (!reason) return next(e)
-      await bumpDay($, day => { day.blockedReads += 1 })
+      // Só o Read tem tamanho conhecido; Grep e Glob negados contam sem tokens
+      const size = e.tool === 'Read' ? (await $.fs.stat(target).catch(() => null))?.size ?? 0 : 0
+      await bumpDay($, day => {
+        day.blockedReads += 1
+        day.blockedTokens += readTokens(size)
+      })
       return { deny: reason }
     }).catch(($, e, next) => next(e))
   }
@@ -1070,7 +1144,13 @@ export const register: Register = (on, rawOptions) => {
       if (!path) return next(e)
       const key = `readguard:${path.toLowerCase()}`
       if (acks.has(key)) {
-        await bumpDay($, day => { day.readGuardBypass += 1 })
+        // O arquivo inteiro entra agora: desconta o que foi creditado no desvio (sobra o custo do esqueleto)
+        const full = readGuardCredit.get(key) ?? 0
+        readGuardCredit.delete(key)
+        await bumpDay($, day => {
+          day.readGuardBypass += 1
+          day.readGuardTokens -= full
+        })
         return next(e)
       }
       const size = (await $.fs.stat(path).catch(() => null))?.size ?? 0
@@ -1078,7 +1158,12 @@ export const register: Register = (on, rawOptions) => {
       const outline = skeleton(path, (await $.fs.read(path)) as string, 120)
       if (!outline) return next(e)
       acks.add(key)
-      await bumpDay($, day => { day.readGuardDenies += 1 })
+      const full = readTokens(size)
+      readGuardCredit.set(key, full)
+      await bumpDay($, day => {
+        day.readGuardDenies += 1
+        day.readGuardTokens += full - estimateTokens(outline)
+      })
       return {
         deny:
           `[CATO] ${target} tem ${Math.round(size / 1000)} KB (≈${Math.round(size / 3.8 / 1000)}k tokens). Leia só o trecho que precisa ` +
@@ -1225,6 +1310,10 @@ export const register: Register = (on, rawOptions) => {
       `A resposta de ${tool} (${lines.length} linhas) foi indexada para proteger o contexto.\n` +
       `Para buscar termos nela, chame a ferramenta mcp__cato__search_sandbox com id="${id}".${hint}\n\n` +
       `--- Prévia (primeiras 15 linhas) ---\n${preview}\n... [+${Math.max(0, lines.length - 15)} linhas em #${id}]`
+    await bumpDay($, day => {
+      day.sandboxed += 1
+      day.sandboxTokens += Math.max(0, rawTokens - estimateTokens(summary))
+    })
     return withText(ran, summary)
   })
 
