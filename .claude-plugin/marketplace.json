@@ -1,0 +1,11 @@
+{
+  "name": "cato",
+  "owner": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
+  "plugins": [
+    {
+      "name": "cato",
+      "source": "./plugin",
+      "description": "Economia de tokens medida, sem Python: guard de contexto e cache, autocompactação, status de custo, compressão de saídas ruidosas e navegação de código."
+    }
+  ]
+}

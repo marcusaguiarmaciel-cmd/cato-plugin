@@ -1,0 +1,72 @@
+{
+  "name": "cato",
+  "displayName": "CATO — Claude Adaptive Token Optimizer",
+  "version": "1.0.0",
+  "description": "Economia de tokens medida, sem Python: guard de contexto e cache, bloqueio de leituras pesadas, autocompactação, status de custo, compressão de saídas ruidosas e ferramentas de navegação de código.",
+  "author": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
+  "homepage": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
+  "repository": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
+  "license": "LicenseRef-MIT-Commons-Clause",
+  "keywords": ["token-optimization", "prompt-caching", "context-engineering", "cost"],
+  "agents": ["./agents/cato-explorer.md"],
+  "userConfig": {
+    "guard": {
+      "type": "boolean",
+      "title": "Guard de contexto e cache",
+      "description": "Avisa quando o contexto cruza as faixas configuradas e segura uma vez o prompt quando o cache expirou e continuar custaria caro.",
+      "default": true
+    },
+    "guardBlockUsd": {
+      "type": "number",
+      "title": "Custo mínimo para segurar o prompt (USD)",
+      "description": "Com o cache expirado, o prompt só é segurado se reescrever o contexto custar pelo menos este valor. 0 desliga o bloqueio (só avisa).",
+      "default": 1,
+      "min": 0
+    },
+    "contextWarn": {
+      "type": "string",
+      "title": "Faixas de aviso de contexto (tokens)",
+      "description": "Lista separada por vírgulas. Cada faixa avisa uma vez por sessão (de novo após /compact).",
+      "default": "250000,400000,600000"
+    },
+    "cacheTtlMinutes": {
+      "type": "number",
+      "title": "Duração do cache (minutos)",
+      "description": "60 na assinatura (TTL de 1h); 5 com chave de API.",
+      "default": 60,
+      "min": 1
+    },
+    "autoCompactPercent": {
+      "type": "number",
+      "title": "Autocompactar ao atingir (% da janela)",
+      "description": "Compacta antes do próximo prompt quando o contexto passa deste percentual da janela. 0 desliga.",
+      "default": 65,
+      "min": 0,
+      "max": 100
+    },
+    "blockHeavyReads": {
+      "type": "boolean",
+      "title": "Bloquear leituras pesadas",
+      "description": "Nega leitura de node_modules, dist, build, coverage, .next, target, venvs, lockfiles e bundles minificados.",
+      "default": true
+    },
+    "compressShell": {
+      "type": "boolean",
+      "title": "Comprimir saídas ruidosas do shell",
+      "description": "Testes, linters, instalações, builds e logs de container. Saídas de dados nunca são alteradas.",
+      "default": true
+    },
+    "disableForks": {
+      "type": "boolean",
+      "title": "Evitar forks de subagente",
+      "description": "Um fork copia o contexto inteiro da conversa para o subagente; o CATO pede um subagente com contexto limpo em vez disso.",
+      "default": true
+    },
+    "pythonChecks": {
+      "type": "boolean",
+      "title": "Usar Python quando existir",
+      "description": "Checagem de sintaxe exata de arquivos .py após edição, só se houver Python na máquina. Sem Python, nada muda.",
+      "default": true
+    }
+  }
+}
