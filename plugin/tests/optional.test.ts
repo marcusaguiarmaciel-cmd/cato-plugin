@@ -78,3 +78,34 @@ test('maskColdCompact: com cache quente a compactação recebe as mensagens inta
   await $.session.compact({ trigger: 'manual', messages })
   expect(seen).toEqual([0, 5])
 })
+
+const CMD = (args: string) => ({ command: 'cato', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
+
+test('/cato experimental ligar: grava as duas opções e já vale na sessão; desligar volta', async ($, on) => {
+  project(on)
+  const sets: string[] = []
+  on('config.set', (_, e) => {
+    sets.push(`${e.key}=${String(e.value)}`)
+    return { value: e.value }
+  })
+  const status = String(((await $.command.run(CMD('experimental'))) as { text?: string }).text)
+  expect(status).toContain('readGuard desligado, maskColdCompact desligado')
+  expect(sets).toHaveLength(0)
+
+  const on1 = String(((await $.command.run(CMD('experimental ligar'))) as { text?: string }).text)
+  expect(on1).toContain('readGuard ligado, maskColdCompact ligado')
+  expect(sets).toEqual(['cato.readGuard=true', 'cato.maskColdCompact=true'])
+  expect(String((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny)).toContain('[CATO] src/big.ts tem')
+
+  const off = String(((await $.command.run(CMD('experimental desligar'))) as { text?: string }).text)
+  expect(off).toContain('readGuard desligado, maskColdCompact desligado')
+  expect((await $.tool.call({ tool: 'Read', file_path: 'src/other.ts' })).deny).toBeUndefined()
+})
+
+test('/cato experimental ligar: recusa da configuração é mostrada e a opção fica como estava', async ($, on) => {
+  project(on)
+  on('config.set', (_, e) => (e.key === 'cato.readGuard' ? { deny: 'bloqueado pela organização' } : { value: e.value }))
+  const text = String(((await $.command.run(CMD('experimental ligar'))) as { text?: string }).text)
+  expect(text).toContain('readGuard desligado, maskColdCompact ligado')
+  expect(text).toContain('Não foi possível mudar readGuard: bloqueado pela organização')
+})

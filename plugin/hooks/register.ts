@@ -752,6 +752,40 @@ async function doctor($: EngineInterface): Promise<string> {
   return out.join('\n')
 }
 
+// -------------------------------------------------------------------------------------------------------
+// /cato experimental [ligar|desligar]: os recursos experimentais pela configuração do plugin (a mesma do /plugin)
+// -------------------------------------------------------------------------------------------------------
+const EXPERIMENTAL_HELP =
+  '  • readGuard: Read inteiro de código acima de 60 KB recebe antes o esqueleto com as linhas; a segunda tentativa passa.\n' +
+  '  • maskColdCompact: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo.'
+
+const onOff = (value: boolean): string => (value ? 'ligado' : 'desligado')
+
+async function toggleExperimental($: EngineInterface, action: string): Promise<string> {
+  const turnOn = ['ligar', 'on', 'ativar', 'sim'].includes(action)
+  const turnOff = ['desligar', 'off', 'desativar', 'nao', 'não'].includes(action)
+  if (!turnOn && !turnOff) {
+    return [
+      `CATO — recursos experimentais: readGuard ${onOff(!!options.readGuard)}, maskColdCompact ${onOff(!!options.maskColdCompact)}.`,
+      EXPERIMENTAL_HELP,
+      'Use /cato experimental ligar ou /cato experimental desligar.',
+    ].join('\n')
+  }
+  // $.config.set só aceita a chave literal: uma chamada por campo
+  const results = [
+    ['readGuard', await $.config.set({ key: 'cato.readGuard', value: turnOn }).catch((error: Error) => ({ deny: error.message }))],
+    ['maskColdCompact', await $.config.set({ key: 'cato.maskColdCompact', value: turnOn }).catch((error: Error) => ({ deny: error.message }))],
+  ] as const
+  const denied = results.filter(([, r]) => r.deny !== undefined)
+  // Vale já nesta sessão, sem esperar o plugin recarregar com a configuração nova
+  const applied = Object.fromEntries(results.filter(([, r]) => r.deny === undefined).map(([field]) => [field, turnOn]))
+  options = { ...options, ...applied }
+  const out = [`CATO — recursos experimentais: readGuard ${onOff(!!options.readGuard)}, maskColdCompact ${onOff(!!options.maskColdCompact)}.`]
+  if (turnOn && !denied.length) out.push(EXPERIMENTAL_HELP, 'O /cato mostra quantas leituras o readGuard desviou e quantas foram pedidas de novo.')
+  if (denied.length) out.push(...denied.map(([field, r]) => `Não foi possível mudar ${field}: ${r.deny}`))
+  return out.join('\n')
+}
+
 // Sandboxes e logs brutos com mais de 14 dias, uma vez por sessão. $.fs não apaga arquivos: usa o rm
 // (Unix ou Git for Windows) e, sem ele, o del do cmd.
 async function cleanupOldFiles($: EngineInterface): Promise<void> {
@@ -1260,8 +1294,10 @@ export const register: Register = (on, rawOptions) => {
     })
     await $.command.register({
       name: 'cato',
-      description: 'CATO: custo real, cache misses e o que mais economiza no seu uso (importar: sessões anteriores; doctor: diagnóstico)',
-      argumentHint: '[dias | importar | doctor]',
+      description:
+        'CATO: custo real, cache misses e o que mais economiza no seu uso ' +
+        '(importar: sessões anteriores; doctor: diagnóstico; experimental: liga/desliga os recursos experimentais)',
+      argumentHint: '[dias | importar | doctor | experimental [ligar|desligar]]',
     })
     await cleanupOldFiles($)
     return next(e)
@@ -1275,6 +1311,8 @@ export const register: Register = (on, rawOptions) => {
       return { text: await importHistory($, () => next.budget.remainingMs) }
     }
     if (arg === 'doctor') return { text: await doctor($) }
+    const experimental = arg.match(/^experimenta(?:l|is)(?:\s+(\S+))?$/)
+    if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '') }
     return { text: await costReport($, days(arg)) }
   })
 
