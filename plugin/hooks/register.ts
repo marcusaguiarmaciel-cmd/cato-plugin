@@ -331,16 +331,24 @@ async function graphQuery($: EngineInterface, term: string, limit: number): Prom
 
 // ast-grep: `ast-grep` e, no Windows/macOS, o atalho `sg` (no Linux `sg` costuma ser o setgroups, por isso a checagem)
 async function findAstGrep($: EngineInterface): Promise<string | null> {
-  if (astGrep !== undefined) return astGrep
-  for (const candidate of ['ast-grep', 'sg']) {
-    try {
-      const r = await $.process.run([candidate, '--version'], { timeoutMs: 5000 })
-      if (r.exitCode === 0 && /ast-grep/i.test(r.stdout + r.stderr)) return (astGrep = candidate)
-    } catch {
-      // tenta o próximo
-    }
+  // Só o achado fica guardado: instalado com a sessão aberta, passa a valer na próxima chamada
+  if (astGrep) return astGrep
+  const works = async (candidate: string) => {
+    const r = await $.process.run([candidate, '--version'], { timeoutMs: 5000 }).catch(() => null)
+    return !!r && r.exitCode === 0 && /ast-grep/i.test(r.stdout + r.stderr)
   }
-  return (astGrep = null)
+  for (const candidate of ['ast-grep', 'sg']) if (await works(candidate)) return (astGrep = candidate)
+  // Fora do PATH: o binário do `npm i -g @ast-grep/cli` (Windows) e do `cargo install ast-grep`
+  const appData = (await $.env.get('APPDATA').catch(() => undefined))?.replace(/\\/g, '/')
+  const home = await homeDir($).catch(() => null)
+  const installed = [
+    ...(appData ? [`${appData}/npm/node_modules/@ast-grep/cli/ast-grep.exe`] : []),
+    ...(home ? [`${home}/.cargo/bin/ast-grep.exe`, `${home}/.cargo/bin/ast-grep`] : []),
+  ]
+  for (const path of installed) {
+    if ((await $.fs.exists(path).catch(() => false)) && (await works(path))) return (astGrep = path)
+  }
+  return null
 }
 
 async function structuralSearch($: EngineInterface, input: { pattern: string; lang?: string; path?: string; max_results?: number }): Promise<string> {
@@ -1435,7 +1443,11 @@ export const register: Register = (on, rawOptions) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  const days = (value: unknown): number => Math.max(1, Math.min(LEDGER_DAYS, Number(value) || 30))
+  // Só um número inteiro escrito muda o período; vazio ou qualquer outra coisa fica em 30 dias
+  const days = (value: unknown): number => {
+    const text = String(value ?? '').trim()
+    return /^\d{1,3}$/.test(text) ? Math.max(1, Math.min(LEDGER_DAYS, Number(text))) : 30
+  }
 
   on('command.run', { command: 'cato' }, async ($, e, next) => {
     const arg = String(e.args ?? '').trim().toLowerCase()

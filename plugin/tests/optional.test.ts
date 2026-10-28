@@ -138,3 +138,30 @@ test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do p
   expect(text).toMatch(/comandos reescritos pelo RTK\s+15x\s+500k tokens\s+\(medido pelo rtk gain\)/)
   expect(text).toMatch(/total: 500k tokens a menos no contexto ≈ \$\d+\.\d+/)
 })
+
+test('ast-grep fora do PATH: o binário do npm global em %APPDATA% é encontrado', async ($, on) => {
+  const bin = 'C:/Users/t/AppData/Roaming/npm/node_modules/@ast-grep/cli/ast-grep.exe'
+  mock.store(on)
+  mock.clock(on)
+  mock.env(on, { USERPROFILE: 'C:\\Users\\t', APPDATA: 'C:\\Users\\t\\AppData\\Roaming' })
+  on('session.cwd', () => ({ value: 'C:/proj' }))
+  on('fs.read', () => ({ deny: 'missing' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', (_, e) => ({ value: norm(e.path) === bin }))
+  on('process.run', (_, e) =>
+    norm(e.argv[0]) === bin
+      ? { value: { exitCode: 0, stdout: 'ast-grep 0.51.0', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
+  )
+  const text = String(((await $.command.run({ ...CMD(''), command: 'cato-doctor' })) as { text?: string }).text)
+  expect(text).toContain('ast-grep instalado')
+})
+
+test('/cato: período só muda com número escrito', async ($, on) => {
+  project(on)
+  const run = async (args: string) => String(((await $.command.run(CMD(args))) as { text?: string }).text)
+  expect(await run('')).toContain('Cache misses da conversa principal (30 dias')
+  expect(await run('  ')).toContain('(30 dias')
+  expect(await run('7')).toContain('(7 dias')
+  expect(await run('500')).toContain('(90 dias')
+})
