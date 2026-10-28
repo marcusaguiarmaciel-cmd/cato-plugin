@@ -95,6 +95,12 @@
       "default": 5,
       "min": 1,
       "max": 60
+    },
+    "compactInstructions": {
+      "type": "string",
+      "title": "Instruções de compactação",
+      "description": "O que o resumo deve guardar quando ninguém deu instruções (autocompactação, /compact sem texto). Vazio desliga; o texto do seu /compact sempre prevalece.",
+      "default": "Mantenha o objetivo atual e os pedidos do usuário ainda abertos; as decisões tomadas e o motivo de cada uma; os caminhos dos arquivos alterados; erros e testes que ainda falham, com a mensagem exata; e os próximos passos. Não reproduza conteúdo de arquivos, saídas de ferramentas nem logs: cite caminhos e os IDs #cmd_/#sbx_ do CATO. Seja conciso."
     }
   }
 }

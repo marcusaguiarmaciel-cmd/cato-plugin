@@ -25,7 +25,7 @@ import {
   toolFamily,
 } from './lib/integrations.ts'
 import type { Graph } from './lib/integrations.ts'
-import { contextTokens, priceFor, usageCost, usd } from './lib/pricing.ts'
+import { contextTokens, priceFor, sameModel, usageCost, usd } from './lib/pricing.ts'
 import type { StepUsage } from './lib/pricing.ts'
 
 type Options = {
@@ -42,7 +42,22 @@ type Options = {
   astGrepMaxResults: number
   compactGithub: boolean
   subagentCacheTtlMinutes: number
+  compactInstructions: string
 }
+
+// O que o resumo da compactação deve guardar: recall primeiro (guia de context engineering da Anthropic),
+// e nada de saídas brutas, que só voltariam a encher o contexto
+const CATO_COMPACT =
+  'Mantenha o objetivo atual e os pedidos do usuário ainda abertos; as decisões tomadas e o motivo de cada uma; ' +
+  'os caminhos dos arquivos alterados; erros e testes que ainda falham, com a mensagem exata; e os próximos passos. ' +
+  'Não reproduza conteúdo de arquivos, saídas de ferramentas nem logs: cite caminhos e os IDs #cmd_/#sbx_ do CATO. Seja conciso.'
+
+/** Instruções do CATO para a compactação; string vazia nas opções desliga. */
+const compactInstructions = (): string =>
+  typeof options.compactInstructions === 'string' ? options.compactInstructions.trim() : CATO_COMPACT
+
+// Abaixo disso, trocar de modelo custa pouco e o aviso só atrapalharia
+const MODEL_SWITCH_MIN_CONTEXT = 50_000
 
 type Day = {
   calls: number
@@ -569,7 +584,11 @@ export const register: Register = (on, rawOptions) => {
     // Autocompactação (o que CLAUDE_AUTOCOMPACT_PCT_OVERRIDE fazia, agora sem variável de ambiente)
     const pct = usage.context.percent ?? 0
     if (options.autoCompactPercent > 0 && pct >= options.autoCompactPercent) {
-      const compacted = await $.session.compact({}).then(r => !('skip' in r && r.skip)).catch(() => false)
+      const instructions = compactInstructions()
+      const compacted = await $.session
+        .compact(instructions ? { instructions } : {})
+        .then(r => !('skip' in r && r.skip))
+        .catch(() => false)
       if (compacted) {
         $.ui.toast(`CATO: contexto em ${Math.round(pct)}% da janela; compactado antes do seu prompt.`)
         return next(withPending())
@@ -607,6 +626,23 @@ export const register: Register = (on, rawOptions) => {
       return next(withPending())
     }
 
+    // Troca de modelo com o cache quente: cada modelo tem o seu cache, então o próximo turno relê tudo.
+    // O /model do terminal já pede confirmação; aqui só o custo, que vale também para o seletor do app,
+    // o opusplan e skills com outro modelo. Nunca segura o prompt.
+    if (lastModel && lastStepAt && now - lastStepAt <= ttlMs && ctx >= MODEL_SWITCH_MIN_CONTEXT) {
+      const current = await $.session.model()
+      const key = `model:${lastStepAt}:${current}`
+      if (sameModel(current, lastModel) === false && !acks.has(key)) {
+        acks.add(key)
+        const write = writePrice(current)
+        $.ui.toast(
+          `CATO: trocar de ${lastModel} para ${current} relê ${Math.round(ctx / 1000)}k tokens sem cache` +
+            `${write !== null ? ` ≈ ${usd((ctx * write) / 1e6)}` : ''}. ` +
+            'Para uma tarefa pontual, um subagente com o outro modelo não mexe no cache desta conversa.',
+        )
+      }
+    }
+
     // Contexto grande: só avisa, uma vez por faixa
     const band = bands.filter(b => ctx >= b).pop()
     if (band && !acks.has(`ctx:${band}`)) {
@@ -624,7 +660,11 @@ export const register: Register = (on, rawOptions) => {
   // `precompute` só prepara um resumo para a próxima compactação: nada foi compactado ainda.
   // ---------------------------------------------------------------------------------------------------
   on('session.compact', async ($, e, next) => {
-    if (e.trigger === 'precompute') return next(e)
+    // Instruções do CATO só quando ninguém deu as suas (o texto do /compact do usuário fica intocado).
+    // Valem também para o precompute, cujo resumo é o que a próxima compactação instala.
+    const instructions = compactInstructions()
+    const call = !e.agentId && instructions && !e.instructions?.trim() ? { ...e, instructions } : e
+    if (e.trigger === 'precompute') return next(call)
     if (e.agentId) {
       // Subagente compactado: a próxima escrita grande dele é reconstrução, não miss
       const agentId = e.agentId
@@ -636,7 +676,7 @@ export const register: Register = (on, rawOptions) => {
       return done
     }
     const diffStat = await git($, ['diff', '--stat'])
-    const result = await next(e)
+    const result = await next(call)
     if (!('skip' in result && result.skip)) {
       compactedAt = await $.clock.now()
       for (const key of [...acks]) if (key.startsWith('ctx:')) acks.delete(key)

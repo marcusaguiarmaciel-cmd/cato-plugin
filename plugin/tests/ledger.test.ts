@@ -130,3 +130,48 @@ test('sameModel: alias casa com a família; opusplan e vazio são "não sei"', (
   expect(sameModel('opusplan', 'claude-opus-5-5')).toBeNull()
   expect(sameModel('', 'claude-opus-5-5')).toBeNull()
 })
+
+test('compactação: instruções do CATO entram só quando ninguém deu as suas, inclusive no precompute', async ($, on) => {
+  mock.store(on)
+  mock.clock(on)
+  on('ui.status', () => ({ value: undefined }))
+  const seen: (string | undefined)[] = []
+  on('session.compact', (_, e) => {
+    seen.push(e.instructions)
+    return { messages: [MSG] }
+  })
+  await $.session.compact({ trigger: 'auto', messages: [MSG] })
+  await $.session.compact({ trigger: 'manual', messages: [MSG], instructions: 'foque no bug de login' })
+  await $.session.compact({ trigger: 'precompute', messages: [MSG] })
+  await $.session.compact({ trigger: 'auto', messages: [MSG], agentId: 'agent-1' })
+  expect(String(seen[0])).toContain('decisões tomadas')
+  expect(seen[1]).toBe('foque no bug de login')
+  expect(String(seen[2])).toContain('decisões tomadas')
+  expect(seen[3]).toBeUndefined()
+})
+
+test('troca de modelo com cache quente: um aviso com o custo, sem segurar o prompt', async ($, on) => {
+  const { clock, state, toasts } = world(on)
+  let current = 'claude-opus-5-5'
+  on('session.model', () => ({ value: current }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 200_000, window: 1_000_000, percent: 20 }, rateLimits: [] } }))
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  const submit = () => $.prompt.submit({ text: 'oi', wait: false, origin: { kind: 'composer' } })
+
+  state.usage = usage('claude-opus-5-5', 200_000, 5_000)
+  await step($)
+  await clock.advance(60_000)
+
+  // mesmo modelo (alias): nada
+  current = 'opus'
+  expect((await submit()).drop).toBeUndefined()
+  expect(toasts.filter(t => t.includes('trocar de'))).toHaveLength(0)
+
+  // outro modelo: um aviso com custo, prompt segue; repetir não avisa de novo
+  current = 'claude-sonnet-5-5'
+  expect((await submit()).drop).toBeUndefined()
+  expect((await submit()).drop).toBeUndefined()
+  const warned = toasts.filter(t => t.includes('trocar de'))
+  expect(warned).toHaveLength(1)
+  expect(warned[0]).toContain('para claude-sonnet-5-5 relê 200k tokens sem cache ≈ $0.80')
+})
