@@ -120,3 +120,21 @@ test('/cato experimental desligar vale por cima do /plugin', { options: { readGu
   expect(text).toContain('readGuard desligado, maskColdCompact desligado')
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny).toBeUndefined()
 })
+
+test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do período', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: Date.UTC(2026, 9, 28, 15) })
+  const daily = [
+    { date: '2026-10-28', commands: 10, saved_tokens: 400_000 },
+    { date: '2026-10-27', commands: 5, saved_tokens: 100_000 },
+    { date: '2026-01-01', commands: 99, saved_tokens: 9_000_000 },
+  ]
+  on('process.run', (_, e) =>
+    e.argv[0] === 'rtk'
+      ? { value: { exitCode: 0, stdout: JSON.stringify({ summary: {}, daily }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      : { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
+  )
+  const text = String(((await $.command.run(CMD('7'))) as { text?: string }).text)
+  expect(text).toMatch(/comandos reescritos pelo RTK\s+15x\s+500k tokens\s+\(medido pelo rtk gain\)/)
+  expect(text).toMatch(/total: 500k tokens a menos no contexto ≈ \$\d+\.\d+/)
+})

@@ -378,6 +378,25 @@ async function searchSandbox($: EngineInterface, id: string, query: string): Pro
   return hits.length ? hits.map(h => `=== [${h.title}] ===\n${h.content}`).join('\n\n') : `Nenhum resultado para '${query}' em ${id}.`
 }
 
+/** Economia do RTK nos dias pedidos (`rtk gain --daily --format json`), ou null sem RTK. */
+async function rtkSavings($: EngineInterface, keys: string[]): Promise<{ commands: number; saved: number } | null> {
+  const r = await $.process.run(['rtk', 'gain', '--daily', '--format', 'json'], { timeoutMs: 5_000 }).catch(() => null)
+  if (!r || r.exitCode !== 0) return null
+  try {
+    const daily = (JSON.parse(r.stdout) as { daily?: { date?: string; commands?: number; saved_tokens?: number }[] }).daily ?? []
+    const wanted = new Set(keys)
+    const total = { commands: 0, saved: 0 }
+    for (const d of daily) {
+      if (!d.date || !wanted.has(d.date)) continue
+      total.commands += Number(d.commands) || 0
+      total.saved += Number(d.saved_tokens) || 0
+    }
+    return total
+  } catch {
+    return null
+  }
+}
+
 async function costReport($: EngineInterface, days: number): Promise<string> {
   const ledger = await loadLedger($)
   const history = await loadHistory($)
@@ -405,6 +424,8 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     ['leituras grandes trocadas pelo esqueleto', period.readGuardDenies, period.readGuardTokens, `${period.readGuardBypass} pedidas de novo e descontadas`],
     ['resultados antigos mascarados antes do resumo', period.masks, period.maskedTokens],
   ]
+  const rtk = await rtkSavings($, lastDayKeys(now, days))
+  if (rtk) savings.unshift(['comandos reescritos pelo RTK', rtk.commands, rtk.saved, 'medido pelo rtk gain'])
   const savedTokens = savings.reduce((n, [, , tokens]) => n + tokens, 0)
   const savingsLines = savings
     .filter(([, count]) => count > 0)
@@ -440,7 +461,7 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
         ]
       : []),
     '',
-    `Tokens economizados pelo CATO (${days} dias, estimativa por caracteres):`,
+    `Tokens economizados (${days} dias; RTK pelo rtk gain, o resto estimado por caracteres):`,
     ...(savingsLines.length
       ? [
           ...savingsLines,
