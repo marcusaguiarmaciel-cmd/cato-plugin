@@ -421,7 +421,7 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
         ]
       : []),
     '',
-    `Intervenções:${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
+    `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
       `${period.compressions} saídas comprimidas (≈ −${period.compressedTokens.toLocaleString('pt-BR')} tokens, estimativa por caracteres).`,
     ...(period.readGuardDenies
       ? [`Esqueleto em leitura grande: ${period.readGuardDenies} leituras desviadas, ${period.readGuardBypass} liberadas na segunda tentativa.`]
@@ -745,6 +745,8 @@ async function doctor($: EngineInterface): Promise<string> {
     : 'Histórico ainda não importado: /cato importar.')
 
   section('Opções ativas')
+  const flags = await experimentalFlags($)
+  info(`Experimentais em vigor: readGuard ${onOff(flags.readGuard)}, maskColdCompact ${onOff(flags.maskColdCompact)} (/cato experimental).`)
   for (const [key, value] of Object.entries(options ?? {})) {
     const shown = typeof value === 'string' && value.length > 60 ? `${value.slice(0, 57)}...` : JSON.stringify(value)
     info(`${key} = ${shown}`)
@@ -753,8 +755,26 @@ async function doctor($: EngineInterface): Promise<string> {
 }
 
 // -------------------------------------------------------------------------------------------------------
-// /cato experimental [ligar|desligar]: os recursos experimentais pela configuração do plugin (a mesma do /plugin)
+// /cato experimental [ligar|desligar|padrão]: liga os recursos experimentais sem passar pelo /plugin.
+// As opções de plugin não são linhas do /config, então $.config.set não as alcança: a escolha fica no
+// $.store do CATO e vale por cima da configuração do /plugin até "padrão" devolvê-la.
 // -------------------------------------------------------------------------------------------------------
+type ExperimentalOverride = { readGuard?: boolean; maskColdCompact?: boolean }
+
+const EXPERIMENTAL_KEY = 'experimental'
+let experimentalOverride: ExperimentalOverride | null = null
+
+async function experimentalFlags($: EngineInterface): Promise<{ readGuard: boolean; maskColdCompact: boolean }> {
+  if (!experimentalOverride) {
+    const raw = await $.store.get(EXPERIMENTAL_KEY).catch(() => null)
+    experimentalOverride = raw && typeof raw === 'object' ? (raw as ExperimentalOverride) : {}
+  }
+  return {
+    readGuard: experimentalOverride.readGuard ?? !!options.readGuard,
+    maskColdCompact: experimentalOverride.maskColdCompact ?? !!options.maskColdCompact,
+  }
+}
+
 const EXPERIMENTAL_HELP =
   '  • readGuard: Read inteiro de código acima de 60 KB recebe antes o esqueleto com as linhas; a segunda tentativa passa.\n' +
   '  • maskColdCompact: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo.'
@@ -764,25 +784,19 @@ const onOff = (value: boolean): string => (value ? 'ligado' : 'desligado')
 async function toggleExperimental($: EngineInterface, action: string): Promise<string> {
   const turnOn = ['ligar', 'on', 'ativar', 'sim'].includes(action)
   const turnOff = ['desligar', 'off', 'desativar', 'nao', 'não'].includes(action)
-  if (!turnOn && !turnOff) {
-    return [
-      `CATO — recursos experimentais: readGuard ${onOff(!!options.readGuard)}, maskColdCompact ${onOff(!!options.maskColdCompact)}.`,
-      EXPERIMENTAL_HELP,
-      'Use /cato experimental ligar ou /cato experimental desligar.',
-    ].join('\n')
+  const reset = ['padrão', 'padrao', 'reset'].includes(action)
+  if (turnOn || turnOff || reset) {
+    experimentalOverride = reset ? {} : { readGuard: turnOn, maskColdCompact: turnOn }
+    await $.store.set(EXPERIMENTAL_KEY, experimentalOverride)
   }
-  // $.config.set só aceita a chave literal: uma chamada por campo
-  const results = [
-    ['readGuard', await $.config.set({ key: 'cato.readGuard', value: turnOn }).catch((error: Error) => ({ deny: error.message }))],
-    ['maskColdCompact', await $.config.set({ key: 'cato.maskColdCompact', value: turnOn }).catch((error: Error) => ({ deny: error.message }))],
-  ] as const
-  const denied = results.filter(([, r]) => r.deny !== undefined)
-  // Vale já nesta sessão, sem esperar o plugin recarregar com a configuração nova
-  const applied = Object.fromEntries(results.filter(([, r]) => r.deny === undefined).map(([field]) => [field, turnOn]))
-  options = { ...options, ...applied }
-  const out = [`CATO — recursos experimentais: readGuard ${onOff(!!options.readGuard)}, maskColdCompact ${onOff(!!options.maskColdCompact)}.`]
-  if (turnOn && !denied.length) out.push(EXPERIMENTAL_HELP, 'O /cato mostra quantas leituras o readGuard desviou e quantas foram pedidas de novo.')
-  if (denied.length) out.push(...denied.map(([field, r]) => `Não foi possível mudar ${field}: ${r.deny}`))
+  const flags = await experimentalFlags($)
+  const source = Object.keys(experimentalOverride ?? {}).length ? 'escolhido por /cato experimental' : 'configuração do /plugin'
+  const out = [`CATO — recursos experimentais (${source}): readGuard ${onOff(flags.readGuard)}, maskColdCompact ${onOff(flags.maskColdCompact)}.`]
+  if (!turnOn && !turnOff && !reset) {
+    out.push(EXPERIMENTAL_HELP, 'Use /cato experimental ligar, desligar, ou padrão para voltar a seguir o /plugin.')
+  } else if (turnOn) {
+    out.push(EXPERIMENTAL_HELP, 'O /cato mostra quantas leituras o readGuard desviou e quantas foram pedidas de novo.')
+  }
   return out.join('\n')
 }
 
@@ -1010,7 +1024,7 @@ export const register: Register = (on, rawOptions) => {
     const diffStat = await git($, ['diff', '--stat'])
     // Opcional: com o cache frio, resultados antigos e grandes viram uma linha antes do resumo (lê menos a preço cheio)
     let toSummarize = call
-    if (options.maskColdCompact && lastStepAt && (await $.clock.now()) - lastStepAt > ttlMs) {
+    if (lastStepAt && (await $.clock.now()) - lastStepAt > ttlMs && (await experimentalFlags($)).maskColdCompact) {
       const masked = maskOldToolResults(call.messages, MASK_KEEP_EXCHANGES, MASK_MIN_CHARS)
       if (masked.masked) toSummarize = { ...call, messages: masked.messages }
     }
@@ -1047,7 +1061,7 @@ export const register: Register = (on, rawOptions) => {
   // ---------------------------------------------------------------------------------------------------
   {
     on('tool.call', { tool: 'Read' }, async ($, e, next) => {
-      if (!options.readGuard) return next(e)
+      if (!(await experimentalFlags($)).readGuard) return next(e)
       const input = e as unknown as { file_path?: string; offset?: number; limit?: number; pages?: string }
       const target = String(input.file_path ?? '')
       if (!target || input.offset !== undefined || input.limit !== undefined || input.pages !== undefined || !isCodeFile(target)) return next(e)
