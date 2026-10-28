@@ -6,7 +6,7 @@
 
 import type { EngineInterface, Register } from 'claude-code'
 
-import { bm25Search, buildRepoMap, chunkLines, extractSymbol, IGNORED_DIRS, isCodeFile } from './lib/codeintel.ts'
+import { bm25Search, buildRepoMap, chunkLines, extractSymbol, IGNORED_DIRS, isCodeFile, skeleton } from './lib/codeintel.ts'
 import type { SandboxChunk } from './lib/codeintel.ts'
 import { AST_GREP_JSON_RE, ERROR_SIGNAL_RE, estimateTokens, isCompressibleCommand, optimizeOutput } from './lib/compress.ts'
 import {
@@ -31,6 +31,7 @@ import { addDay, dayKey, dayStart, emptyDay } from './lib/ledger.ts'
 import type { Day, Ledger } from './lib/ledger.ts'
 import { aggregate, AWK_EXTRACT, parseExtract, parseJsonlText, powershellExtract } from './lib/history.ts'
 import type { TranscriptEvent } from './lib/history.ts'
+import { maskOldToolResults } from './lib/compaction.ts'
 
 type Options = {
   guard: boolean
@@ -47,6 +48,8 @@ type Options = {
   compactGithub: boolean
   subagentCacheTtlMinutes: number
   compactInstructions: string
+  readGuard: boolean
+  maskColdCompact: boolean
 }
 
 // O que o resumo da compactação deve guardar: recall primeiro (guia de context engineering da Anthropic),
@@ -69,6 +72,11 @@ const HISTORY_KEY = 'history'
 // $.fs.read e a saída de $.process.run param aqui
 const FS_READ_LIMIT = 4 * 1024 * 1024
 const MAX_SEEN_IDS = 200_000
+// readGuard: a partir daqui um Read inteiro de código recebe antes o esqueleto (~15k tokens)
+const READ_GUARD_BYTES = 60_000
+// maskColdCompact: resultados de ferramenta fora das últimas trocas e acima disto viram uma linha
+const MASK_KEEP_EXCHANGES = 10
+const MASK_MIN_CHARS = 2_000
 const MISS_THRESHOLD = 100_000
 const IDLE_MIN_CONTEXT = 150_000
 const COMPACT_SUMMARY_TOKENS = 15_000
@@ -415,6 +423,9 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     '',
     `Intervenções:${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
       `${period.compressions} saídas comprimidas (≈ −${period.compressedTokens.toLocaleString('pt-BR')} tokens, estimativa por caracteres).`,
+    ...(period.readGuardDenies
+      ? [`Esqueleto em leitura grande: ${period.readGuardDenies} leituras desviadas, ${period.readGuardBypass} liberadas na segunda tentativa.`]
+      : []),
   ]
   const recs: string[] = []
   if (period.cost > 0 && period.missIdleCost / period.cost > 0.03) recs.push('Ao voltar de uma pausa longa, use /clear ou /compact em vez de continuar com contexto grande.')
@@ -424,6 +435,9 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
   if (period.cost > 0 && outputPrice && (period.output * outputPrice) / 1e6 / period.cost > 0.1) recs.push('Output passa de 10% do custo: effortLevel alto gera muito raciocínio; use high/medium em tarefas rotineiras.')
   if (period.subCost > 0 && period.subCost / (period.cost + period.subCost) > 0.3) {
     recs.push('Subagentes passam de 30% do custo: dê `model: haiku` ou `sonnet` aos de tarefas simples (busca, leitura, testes).')
+  }
+  if (period.readGuardDenies >= 5 && period.readGuardBypass / period.readGuardDenies > 0.3) {
+    recs.push('Mais de 30% das leituras desviadas pelo readGuard foram pedidas de novo: ele está custando turnos; considere desligá-lo.')
   }
   if (period.cost > 0 && period.band3 / period.cost > 0.3) {
     recs.push('Mais de 30% do custo vem de turnos com contexto acima de 400k: /clear entre tarefas e /compact nas pausas naturais.')
@@ -901,7 +915,8 @@ export const register: Register = (on, rawOptions) => {
             drop:
               `[CATO] Prompt segurado uma vez para evitar gasto: o cache desta conversa expirou (${idleMin} min parada) ` +
               `e continuar agora reescreve ${ctx.toLocaleString('pt-BR')} tokens ≈ ${usd(rewrite)}.\n${choices}\n` +
-              `• Para continuar assim mesmo, envie o prompt de novo (não será segurado outra vez).`,
+              `• Para continuar assim mesmo, envie o prompt de novo (não será segurado outra vez).\n` +
+              `Dica: com idleCompaction ligado (padrão), o Claude Code compacta sozinho conversas longas paradas no cache de 1h.`,
           }
         }
         $.ui.toast(`CATO: cache expirado (${idleMin} min); este turno reescreve ≈ ${usd(rewrite)}. /clear ou /compact saem mais barato.`)
@@ -959,7 +974,13 @@ export const register: Register = (on, rawOptions) => {
       return done
     }
     const diffStat = await git($, ['diff', '--stat'])
-    const result = await next(call)
+    // Opcional: com o cache frio, resultados antigos e grandes viram uma linha antes do resumo (lê menos a preço cheio)
+    let toSummarize = call
+    if (options.maskColdCompact && lastStepAt && (await $.clock.now()) - lastStepAt > ttlMs) {
+      const masked = maskOldToolResults(call.messages, MASK_KEEP_EXCHANGES, MASK_MIN_CHARS)
+      if (masked.masked) toSummarize = { ...call, messages: masked.messages }
+    }
+    const result = await next(toSummarize)
     if (!('skip' in result && result.skip)) {
       compactedAt = await $.clock.now()
       for (const key of [...acks]) if (key.startsWith('ctx:')) acks.delete(key)
@@ -984,6 +1005,39 @@ export const register: Register = (on, rawOptions) => {
       await bumpDay($, day => { day.blockedReads += 1 })
       return { deny: reason }
     }).catch(($, e, next) => next(e))
+  }
+
+  // ---------------------------------------------------------------------------------------------------
+  // Opcional (readGuard): Read inteiro de arquivo de código grande recebe antes o esqueleto com as linhas
+  // de cada declaração. A segunda tentativa no mesmo arquivo passa: o modelo nunca fica travado.
+  // ---------------------------------------------------------------------------------------------------
+  {
+    on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+      if (!options.readGuard) return next(e)
+      const input = e as unknown as { file_path?: string; offset?: number; limit?: number; pages?: string }
+      const target = String(input.file_path ?? '')
+      if (!target || input.offset !== undefined || input.limit !== undefined || input.pages !== undefined || !isCodeFile(target)) return next(e)
+      // Fora do projeto, segredo ou negado pelas regras de leitura: o CATO não mostra nem o esqueleto
+      const path = await readableProjectFile($, target).catch(() => null)
+      if (!path) return next(e)
+      const key = `readguard:${path.toLowerCase()}`
+      if (acks.has(key)) {
+        await bumpDay($, day => { day.readGuardBypass += 1 })
+        return next(e)
+      }
+      const size = (await $.fs.stat(path).catch(() => null))?.size ?? 0
+      if (size < READ_GUARD_BYTES || size > FS_READ_LIMIT) return next(e)
+      const outline = skeleton(path, (await $.fs.read(path)) as string, 120)
+      if (!outline) return next(e)
+      acks.add(key)
+      await bumpDay($, day => { day.readGuardDenies += 1 })
+      return {
+        deny:
+          `[CATO] ${target} tem ${Math.round(size / 1000)} KB (≈${Math.round(size / 3.8 / 1000)}k tokens). Leia só o trecho que precisa ` +
+          `com offset/limit usando as linhas abaixo, ou mcp__cato__read_symbol. Se precisar do arquivo inteiro, peça o Read de novo: ` +
+          `a segunda tentativa passa.\n${outline}`,
+      }
+    }).catch(($, e, next) => (next.called ? Promise.reject(new Error('CATO: falha após o Read')) : next(e)))
   }
 
   // ---------------------------------------------------------------------------------------------------

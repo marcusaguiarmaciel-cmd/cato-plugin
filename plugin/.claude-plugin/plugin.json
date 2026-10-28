@@ -1,14 +1,24 @@
 {
   "name": "cato",
   "displayName": "CATO: Claude Adaptive Token Optimizer",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Reduz o custo de tokens do Claude Code com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente, com integração a Serena, Graphify, ast-grep e GitHub MCP.",
-  "author": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
+  "author": {
+    "name": "Marcus Maciel",
+    "url": "https://github.com/marcusaguiarmaciel-cmd"
+  },
   "homepage": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
   "repository": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
   "license": "LicenseRef-MIT-Commons-Clause",
-  "keywords": ["token-optimization", "prompt-caching", "context-engineering", "cost"],
-  "agents": ["./agents/cato-explorer.md"],
+  "keywords": [
+    "token-optimization",
+    "prompt-caching",
+    "context-engineering",
+    "cost"
+  ],
+  "agents": [
+    "./agents/cato-explorer.md"
+  ],
   "userConfig": {
     "guard": {
       "type": "boolean",
@@ -101,6 +111,18 @@
       "title": "Instruções de compactação",
       "description": "O que o resumo deve guardar quando ninguém deu instruções (autocompactação, /compact sem texto). Vazio desliga; o texto do seu /compact sempre prevalece.",
       "default": "Mantenha o objetivo atual e os pedidos do usuário ainda abertos; as decisões tomadas e o motivo de cada uma; os caminhos dos arquivos alterados; erros e testes que ainda falham, com a mensagem exata; e os próximos passos. Não reproduza conteúdo de arquivos, saídas de ferramentas nem logs: cite caminhos e os IDs #cmd_/#sbx_ do CATO. Seja conciso."
+    },
+    "readGuard": {
+      "type": "boolean",
+      "title": "Esqueleto em leitura grande (experimental)",
+      "description": "Read inteiro de arquivo de código acima de 60 KB recebe antes o esqueleto com as linhas de cada declaração; a segunda tentativa passa. O /cato mostra quantas vezes foi pedido de novo.",
+      "default": false
+    },
+    "maskColdCompact": {
+      "type": "boolean",
+      "title": "Mascarar resultados antigos ao compactar com cache frio (experimental)",
+      "description": "Com o cache expirado, resultados de ferramenta grandes e fora das 10 últimas trocas viram uma linha antes do resumo. Com o cache quente nada muda.",
+      "default": false
     }
   }
 }

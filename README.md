@@ -17,16 +17,28 @@ Requer Claude Code **2.1.290 ou mais novo**.
 |---|---|
 | Guard de contexto/cache | Avisa por faixa de contexto e segura **uma vez** o prompt quando o cache expirou e reescrevê-lo custaria ≥ `guardBlockUsd` |
 | Autocompactação | Compacta antes do prompt ao passar de `autoCompactPercent` % da janela |
+| Instruções de compactação | Quando ninguém deu instruções (autocompactação, `/compact` sem texto), o resumo guarda objetivo, decisões, arquivos alterados, erros abertos e próximos passos, sem saídas brutas (`compactInstructions`; o texto do seu `/compact` prevalece) |
+| Troca de modelo | Com o cache quente, avisa quanto custa reler a conversa no novo modelo (inclui seletor do app, `opusplan` e skills com outro modelo); nunca segura o prompt |
 | Status de custo | Contexto, custo do próximo turno e minutos até o cache expirar (convive com a sua `statusLine`) |
 | Leituras pesadas | Nega Read/Grep/Glob em `node_modules`, builds, venvs, lockfiles e `*.min.*` |
-| Compressão de saídas | Testes, linters, instalações e builds no Bash/PowerShell; log bruto em `~/.cato/logs` |
+| Compressão de saídas | Testes, linters, instalações e builds no Bash/PowerShell; log bruto em `~/.cato/logs`. Falhas têm prioridade: quando passam do limite, a saída diz quantas linhas de erro ficaram de fora e como buscá-las no log |
 | Sintaxe | JSON sempre; `.py` só se houver Python na máquina |
-| Pós-compactação | Estado do Git devolvido ao modelo no próximo prompt |
+| Pós-compactação | `git diff --stat` devolvido ao modelo no próximo prompt (branch e status o Claude Code já relê) |
 | Forks | Pede um subagente com contexto limpo |
 | Ferramentas | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
-| Custo real | `/cato [dias]`: custo por chamada desde a instalação, cache misses por causa e recomendações |
+| Custo real | `/cato [dias]`: custo por chamada, subagentes à parte, custo por faixa de contexto, cache misses por causa (reconstruções após compactar não contam) e recomendações |
+| Histórico | `/cato importar`: soma as sessões anteriores à instalação a partir dos transcripts, sem contar nada duas vezes. Arquivos acima de 4 MiB passam por awk (Unix) ou PowerShell (Windows) |
+| Diagnóstico | `/cato doctor`: só leitura; resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
+| Experimentais (desligados) | `readGuard`: Read inteiro de código acima de 60 KB recebe antes o esqueleto, e a segunda tentativa passa. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo |
 
 As opções ficam no `/plugin`, na configuração do CATO.
+
+### Limites conhecidos
+
+- O custo em dólar é preço de lista; na assinatura, mede o consumo do plano, não uma fatura.
+- O TTL das escritas ao vivo vem das opções (`cacheTtlMinutes`, `subagentCacheTtlMinutes`): a API de mods não separa escritas de 5 min e de 1 h. O import usa o valor exato do transcript. Confira com `/cato doctor`.
+- Trocas de fast mode e de effort (fora dos modelos 5.5) também invalidam o cache, mas a API de mods não as expõe: aparecem como "outras".
+- O import só conta chamadas anteriores ao primeiro dia registrado ao vivo; a parte desse dia anterior à instalação fica de fora.
 
 ## Integrações
 
