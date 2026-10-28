@@ -8,7 +8,23 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { bm25Search, buildRepoMap, chunkLines, extractSymbol, IGNORED_DIRS, isCodeFile } from './lib/codeintel.ts'
 import type { SandboxChunk } from './lib/codeintel.ts'
-import { ERROR_SIGNAL_RE, estimateTokens, isCompressibleCommand, optimizeOutput } from './lib/compress.ts'
+import { AST_GREP_JSON_RE, ERROR_SIGNAL_RE, estimateTokens, isCompressibleCommand, optimizeOutput } from './lib/compress.ts'
+import {
+  compactGithubText,
+  formatAstGrepMatches,
+  graphFileEdges,
+  GRAPHIFY_JSON,
+  GRAPHIFY_REPORT,
+  mcpTargetPath,
+  parseGraph,
+  queryGraph,
+  SERENA_READ_TOOLS,
+  SERENA_WRITE_TOOLS,
+  serenaBudget,
+  toolBaseName,
+  toolFamily,
+} from './lib/integrations.ts'
+import type { Graph } from './lib/integrations.ts'
 import { contextTokens, priceFor, usageCost, usd } from './lib/pricing.ts'
 import type { StepUsage } from './lib/pricing.ts'
 
@@ -22,6 +38,9 @@ type Options = {
   compressShell: boolean
   disableForks: boolean
   pythonChecks: boolean
+  serenaMaxAnswerChars: number
+  astGrepMaxResults: number
+  compactGithub: boolean
 }
 
 type Day = {
@@ -56,9 +75,23 @@ const RAW_FILE_DAYS = 14
 // Leituras que só enchem o contexto (o equivalente às regras `deny` de Read que o CATO instalava)
 const HEAVY_DIR_RE = /(^|[\\/])(node_modules|dist|build|coverage|\.next|target|\.venv|venv)([\\/]|$)/
 const HEAVY_FILE_RE = /(^|[\\/])(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock|uv\.lock)$|\.min\.(js|css)$/
+// O grafo bruto e o cache do Graphify: o resumo está no GRAPH_REPORT.md e a consulta no graph_query
+const GRAPHIFY_HEAVY_RE = /(^|[\\/])graphify-out[\\/](graph\.json|cache([\\/]|$))/
 const SENSITIVE_RE = /(^|[\\/])(\.env(\..*)?|id_rsa[^\\/]*|id_ed25519[^\\/]*|[^\\/]*\.(pem|key|p12|pfx)|[^\\/]*(credentials|secret)[^\\/]*)$/i
 // Respostas MCP que não viram sandbox: as do próprio CATO e as de navegação/tela (imagens, estado de página)
 const SKIP_MCP = /^mcp__(cato|claude[_-]browser|claude[_-]in[_-]chrome|computer[_-]use|playwright|puppeteer|chrome|browser|computer)__/i
+
+/** Por que ler este caminho só encheria o contexto, ou null se a leitura é normal. */
+function heavyReason(path: string): string | null {
+  if (GRAPHIFY_HEAVY_RE.test(path)) {
+    return `[CATO] ${path} é o grafo bruto do Graphify. Leia ${GRAPHIFY_REPORT} para o panorama ou use mcp__cato__graph_query para um termo.`
+  }
+  if (HEAVY_DIR_RE.test(path) || HEAVY_FILE_RE.test(path)) {
+    return `[CATO] ${path} é dependência, build ou lockfile: ler isso só enche o contexto. ` +
+      'Leia o código-fonte do projeto, ou peça explicitamente se precisar mesmo deste arquivo.'
+  }
+  return null
+}
 
 // Configuração e estado da sessão. O estado recomeça a cada reload do módulo, sem prejuízo: no máximo um
 // aviso se repete; o ledger de custo fica no $.store e sobrevive entre sessões.
@@ -71,6 +104,8 @@ let lastCtx = 0
 let compactedAt = 0
 let pendingContext: string | null = null
 let python: string | null | undefined
+let astGrep: string | null | undefined
+let graphCache: { mtimeMs: number; graph: Graph | null } | null = null
 const acks = new Set<string>()
 
 const dayKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10)
@@ -83,6 +118,17 @@ const emptyDay = (): Day => ({
 
 const writePrice = (model: string): number =>
   options.cacheTtlMinutes >= 60 ? priceFor(model).write1h : priceFor(model).write5m
+
+/** Troca o texto de uma resposta MCP mantendo o formato que ela tinha (lista de blocos, `{ content }` ou texto). */
+function withText<T extends { result?: unknown }>(ran: T, text: string): T {
+  const result = ran.result
+  const shaped = Array.isArray(result)
+    ? [{ type: 'text', text }]
+    : result && typeof result === 'object' && Array.isArray((result as { content?: unknown }).content)
+      ? { ...(result as object), content: [{ type: 'text', text }] }
+      : text
+  return { ...ran, result: shaped, text } as T
+}
 
 function randomId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(4)), b => b.toString(16).padStart(2, '0')).join('')
@@ -215,6 +261,19 @@ async function listCodeFiles($: EngineInterface, limit: number): Promise<string[
   return found
 }
 
+// Grafo do Graphify, relido só quando o arquivo muda; acima de 4 MiB o $.fs não lê e o CATO segue sem ele
+async function loadGraph($: EngineInterface): Promise<Graph | null> {
+  try {
+    const { mtimeMs } = await $.fs.stat(GRAPHIFY_JSON)
+    if (graphCache?.mtimeMs === mtimeMs) return graphCache.graph
+    const graph = parseGraph((await $.fs.read(GRAPHIFY_JSON)) as string, await $.session.cwd())
+    graphCache = { mtimeMs, graph }
+    return graph
+  } catch {
+    return null
+  }
+}
+
 async function repoMap($: EngineInterface, focus: string | undefined, budget: number): Promise<string> {
   const files = new Map<string, string>()
   for (const path of await listCodeFiles($, 300)) {
@@ -225,7 +284,51 @@ async function repoMap($: EngineInterface, focus: string | undefined, budget: nu
       // arquivo sumiu ou é ilegível: segue
     }
   }
-  return buildRepoMap(files, focus, budget)
+  const graph = await loadGraph($)
+  const map = buildRepoMap(files, focus, budget, graph ? graphFileEdges(graph) : undefined)
+  return graph ? `${map}\n\n[Ranking reforçado pelo grafo do Graphify: ${graph.links.length} relações. Panorama em ${GRAPHIFY_REPORT}.]` : map
+}
+
+async function graphQuery($: EngineInterface, term: string, limit: number): Promise<string> {
+  const graph = await loadGraph($)
+  if (graph) return queryGraph(graph, term, limit)
+  const exists = await $.fs.exists(GRAPHIFY_JSON).catch(() => false)
+  return exists
+    ? `${GRAPHIFY_JSON} existe mas não pôde ser lido (inválido ou acima de 4 MiB). Use o MCP do Graphify ou ${GRAPHIFY_REPORT}.`
+    : 'Este projeto não tem grafo do Graphify (graphify-out/graph.json). Gere com /graphify . ou use mcp__cato__repo_map.'
+}
+
+// ast-grep: `ast-grep` e, no Windows/macOS, o atalho `sg` (no Linux `sg` costuma ser o setgroups, por isso a checagem)
+async function findAstGrep($: EngineInterface): Promise<string | null> {
+  if (astGrep !== undefined) return astGrep
+  for (const candidate of ['ast-grep', 'sg']) {
+    try {
+      const r = await $.process.run([candidate, '--version'], { timeoutMs: 5000 })
+      if (r.exitCode === 0 && /ast-grep/i.test(r.stdout + r.stderr)) return (astGrep = candidate)
+    } catch {
+      // tenta o próximo
+    }
+  }
+  return (astGrep = null)
+}
+
+async function structuralSearch($: EngineInterface, input: { pattern: string; lang?: string; path?: string; max_results?: number }): Promise<string> {
+  const bin = await findAstGrep($)
+  if (!bin) return 'ast-grep não está instalado (npm i -g @ast-grep/cli, cargo install ast-grep, brew install ast-grep). Use Grep enquanto isso.'
+  const root = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
+  const target = String(input.path || '.').replace(/\\/g, '/')
+  const absolute = /^([A-Za-z]:)?\//.test(target) ? target : `${root}/${target}`
+  if (absolute.split('/').includes('..') || !(`${absolute}/`.toLowerCase().startsWith(`${root.toLowerCase()}/`))) {
+    throw new Error(`${target} está fora do projeto (${root}).`)
+  }
+  if (SENSITIVE_RE.test(absolute)) throw new Error(`${target} parece conter segredos e não é lido pelo CATO.`)
+  const reason = heavyReason(target)
+  if (reason) throw new Error(reason.replace('[CATO] ', ''))
+  const args = [bin, 'run', '--pattern', input.pattern, '--json=stream', ...(input.lang ? ['--lang', input.lang] : []), target]
+  const r = await $.process.run(args, { timeoutMs: 30_000 })
+  if (r.exitCode !== 0 && !r.stdout.trim()) return `ast-grep falhou: ${(r.stderr || 'sem saída').trim().slice(0, 600)}`
+  const max = Number(input.max_results) || options.astGrepMaxResults || 60
+  return formatAstGrepMatches(r.stdout, max) ?? r.stdout.slice(0, 20_000)
 }
 
 async function readSymbol($: EngineInterface, filePath: string, symbol: string): Promise<string> {
@@ -266,7 +369,7 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     'CATO — custo real registrado (preço oficial × tokens faturados de cada chamada)',
     line('hoje', sum(1)),
     line('7 dias', sum(7)),
-    line(`${days} dias`, period),
+    ...(days === 1 || days === 7 ? [] : [line(`${days} dias`, period)]),
     '',
     `Cache misses (${days} dias, reescrita > 100k tokens numa chamada):`,
     `  pausa maior que o cache   ${period.missIdle}x  ${usd(period.missIdleCost)}`,
@@ -458,13 +561,10 @@ export const register: Register = (on, rawOptions) => {
       if (!options.blockHeavyReads) return next(e)
       const input = e as unknown as { file_path?: string; path?: string }
       const target = String(input.file_path ?? input.path ?? '')
-      if (!target || !(HEAVY_DIR_RE.test(target) || HEAVY_FILE_RE.test(target))) return next(e)
+      const reason = target ? heavyReason(target) : null
+      if (!reason) return next(e)
       await bumpDay($, day => { day.blockedReads += 1 })
-      return {
-        deny:
-          `[CATO] ${target} é dependência, build ou lockfile: ler isso só enche o contexto. ` +
-          'Leia o código-fonte do projeto, ou peça explicitamente se precisar mesmo deste arquivo.',
-      }
+      return { deny: reason }
     }).catch(($, e, next) => next(e))
   }
 
@@ -483,7 +583,10 @@ export const register: Register = (on, rawOptions) => {
       const stdout = result.stdout
       const rawTokens = estimateTokens(stdout)
       if (rawTokens < 160 || stdout.length > 30_000) return ran // acima disso o Claude Code já entrega arquivo + prévia
-      const { text, changed, strategy } = optimizeOutput(command, stdout)
+      const astGrepText = AST_GREP_JSON_RE.test(command) ? formatAstGrepMatches(stdout, 0, 20_000) : null
+      const { text, changed, strategy } = astGrepText
+        ? { text: astGrepText, changed: true, strategy: 'ast_grep_json' }
+        : optimizeOutput(command, stdout)
       const optimized = estimateTokens(text)
       if (!changed || (rawTokens - optimized < 80 && optimized > rawTokens * 0.85)) return ran
       const id = `cmd_${randomId()}`
@@ -522,37 +625,81 @@ export const register: Register = (on, rawOptions) => {
   ).catch(($, e, next) => next(e))
 
   // ---------------------------------------------------------------------------------------------------
-  // Respostas MCP grandes: viram um sandbox pesquisável e o modelo recebe só a prévia
+  // Respostas MCP: Serena e ast-grep recebem orçamento antes de rodar; GitHub sai sem campos de API;
+  // o que continuar grande vira um sandbox pesquisável e o modelo recebe só a prévia
   // ---------------------------------------------------------------------------------------------------
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool)
     if (!tool.startsWith('mcp__') || SKIP_MCP.test(tool)) return next(e)
-    const ran = await next(e)
-    if (ran.deny !== undefined || ran.isError || typeof ran.text !== 'string') return ran
+    const family = toolFamily(tool)
+    const base = toolBaseName(tool)
+    const input = e as unknown as Record<string, unknown>
+
+    // Leituras pesadas pelas ferramentas de código e do GitHub, como no Read
+    const target = family && family !== 'graphify' ? mcpTargetPath(input) : ''
+    const reason = options.blockHeavyReads && target ? heavyReason(target) : null
+    if (reason) {
+      await bumpDay($, day => { day.blockedReads += 1 })
+      return { deny: reason }
+    }
+
+    // Orçamento de resposta antes de a ferramenta rodar
+    let call = e
+    if (family === 'serena' && SERENA_READ_TOOLS.has(base)) {
+      const budgeted = serenaBudget(input, options.serenaMaxAnswerChars)
+      if (budgeted) call = budgeted as unknown as typeof e
+    }
+    if (family === 'astgrep' && /^find_code/.test(base) && options.astGrepMaxResults > 0 && !(Number(input.max_results) > 0)) {
+      call = { ...input, max_results: options.astGrepMaxResults } as unknown as typeof e
+    }
+
+    const ran = await next(call)
+    if (ran.deny !== undefined || ran.isError) return ran
+
+    // Edição pela Serena: mesma checagem de sintaxe do Edit
+    if (family === 'serena' && SERENA_WRITE_TOOLS.has(base) && /\.(json|py)$/i.test(target)) {
+      const problem = await syntaxProblem($, target).catch(() => null)
+      return problem ? ({ ...ran, context: [...(ran.context ?? []), problem] } as typeof ran) : ran
+    }
+    // Respostas da Serena e do ast-grep já vêm limitadas e localizadas (arquivo:linha): ficam inteiras
+    if (family === 'serena' || family === 'astgrep' || typeof ran.text !== 'string') return ran
     if (/"type"\s*:\s*"(image|audio|resource)"/.test(JSON.stringify(ran.result ?? '').slice(0, 200_000))) return ran
-    const rawTokens = estimateTokens(ran.text)
-    if (rawTokens < 1500) return ran
+
+    let text = ran.text
+    let current = ran
+    if (family === 'github' && options.compactGithub) {
+      const compacted = compactGithubText(text)
+      if (compacted.changed) {
+        const saved = estimateTokens(text) - estimateTokens(compacted.text)
+        await bumpDay($, day => {
+          day.compressions += 1
+          day.compressedTokens += Math.max(0, saved)
+        })
+        text = compacted.text
+        current = withText(ran, text)
+      }
+    }
+
+    const rawTokens = estimateTokens(text)
+    if (rawTokens < 1500) return current
     const id = `sbx_${randomId()}`
-    const chunks = chunkLines(ran.text)
+    const chunks = chunkLines(text)
     const saved = await $.fs
       .write(`${await homeDir($)}/.cato/sandbox/${id}.json`, JSON.stringify({ tool, chunks }))
       .then(() => true)
       .catch(() => false)
-    if (!saved) return ran
-    const lines = ran.text.split('\n')
+    if (!saved) return current
+    const lines = text.split('\n')
     const preview = lines.slice(0, 15).map(l => l.slice(0, 160)).join('\n').slice(0, 1200)
+    const hint = family === 'github'
+      ? '\nDica: no GitHub MCP, `fields`, `perPage`, `detail: "none"` (get_commit) e `tail_lines` (get_job_logs) reduzem a resposta.'
+      : ''
     const summary =
       `[CATO MCP Sandbox #${id} — ${rawTokens} tokens guardados em ${chunks.length} blocos]\n` +
       `A resposta de ${tool} (${lines.length} linhas) foi indexada para proteger o contexto.\n` +
-      `Para buscar termos nela, chame a ferramenta mcp__cato__search_sandbox com id="${id}".\n\n` +
+      `Para buscar termos nela, chame a ferramenta mcp__cato__search_sandbox com id="${id}".${hint}\n\n` +
       `--- Prévia (primeiras 15 linhas) ---\n${preview}\n... [+${Math.max(0, lines.length - 15)} linhas em #${id}]`
-    const result = ran.result as unknown
-    const shaped = Array.isArray(result)
-      ? [{ type: 'text', text: summary }]
-      : result && typeof result === 'object' && Array.isArray((result as { content?: unknown }).content)
-        ? { ...(result as object), content: [{ type: 'text', text: summary }] }
-        : summary
-    return { ...ran, result: shaped, text: summary } as typeof ran
+    return withText(ran, summary)
   })
 
   // ---------------------------------------------------------------------------------------------------
@@ -599,6 +746,36 @@ export const register: Register = (on, rawOptions) => {
       },
     })
     await $.tool.register({
+      name: 'structural_search',
+      description:
+        'Busca estrutural com ast-grep (casa pela árvore sintática, não por texto): ex. `console.log($A)`, `def $F($$$):`, ' +
+        '`useEffect($$$)`. Devolve `arquivo:L<início>-L<fim>` e o trecho, compacto e limitado. Prefira ao Grep quando o padrão é de código.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Padrão ast-grep; $A casa um nó, $$$ casa vários' },
+          lang: { type: 'string', description: 'Linguagem (ts, tsx, js, py, go, rs, java...); opcional se a extensão basta' },
+          path: { type: 'string', description: 'Pasta ou arquivo dentro do projeto (padrão: o projeto todo)' },
+          max_results: { type: 'number', description: 'Máximo de casamentos (padrão 60)' },
+        },
+        required: ['pattern'],
+      },
+    })
+    await $.tool.register({
+      name: 'graph_query',
+      description:
+        'Consulta o grafo de conhecimento do Graphify (graphify-out/graph.json) sem carregá-lo no contexto: nós que casam com o termo, ' +
+        'onde estão (arquivo:linha), comunidade e relações com os vizinhos.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          term: { type: 'string', description: 'Nome de conceito, classe, função ou arquivo' },
+          limit: { type: 'number', description: 'Máximo de nós (padrão 12)' },
+        },
+        required: ['term'],
+      },
+    })
+    await $.tool.register({
       name: 'cost_report',
       description: 'Custo real registrado pelo CATO (por chamada de API): hoje, 7 e 30 dias, contexto médio, cache misses por causa e recomendações.',
       inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
@@ -619,6 +796,21 @@ export const register: Register = (on, rawOptions) => {
   on('tool.call', { tool: 'mcp__cato__repo_map' }, async ($, e) => {
     const input = e as unknown as { focus?: string; token_budget?: number }
     return { result: await repoMap($, input.focus, Number(input.token_budget) || 1200) }
+  })
+
+  on('tool.call', { tool: 'mcp__cato__structural_search' }, async ($, e) => {
+    const input = e as unknown as { pattern: string; lang?: string; path?: string; max_results?: number }
+    if (!String(input.pattern ?? '').trim()) return { deny: '[CATO] Informe o padrão (pattern).' }
+    try {
+      return { result: await structuralSearch($, { ...input, pattern: String(input.pattern) }) }
+    } catch (error) {
+      return { deny: `[CATO] ${(error as Error).message}` }
+    }
+  })
+
+  on('tool.call', { tool: 'mcp__cato__graph_query' }, async ($, e) => {
+    const input = e as unknown as { term?: string; limit?: number }
+    return { result: await graphQuery($, String(input.term ?? ''), Math.max(1, Math.min(50, Number(input.limit) || 12))) }
   })
 
   on('tool.call', { tool: 'mcp__cato__read_symbol' }, async ($, e) => {

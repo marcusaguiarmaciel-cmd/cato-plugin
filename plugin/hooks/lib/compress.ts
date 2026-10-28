@@ -45,11 +45,14 @@ export function firstWord(command: string): string {
 
 export const isRtkCommand = (command: string): boolean => ['rtk', 'rtk.exe'].includes(firstWord(command))
 
+/** `ast-grep ... --json` (ou `sg`): o JSON repete byteOffset, `lines` e metadados; vira uma linha por casamento. */
+export const AST_GREP_JSON_RE = /(^|[\s;&|])(ast-grep|sg)(\.exe)?\s+(run|scan|-p|--pattern)\b[^\n]*--json/
+
 /** Indica se vale a pena olhar a saída deste comando (filtro barato, antes de o comando rodar). */
 export function isCompressibleCommand(command: string): boolean {
   if (isRtkCommand(command) || CODE_READ_COMMANDS.has(firstWord(command))) return false
   const cmd = stripCdPrefix(command)
-  return TEST_RE.test(cmd) || LINTER_RE.test(cmd) || NOISY_RE.test(cmd) || /\bgit\s+(diff|show)\b/.test(cmd)
+  return TEST_RE.test(cmd) || LINTER_RE.test(cmd) || NOISY_RE.test(cmd) || /\bgit\s+(diff|show)\b/.test(cmd) || AST_GREP_JSON_RE.test(cmd)
 }
 
 export function stripAnsiAndProgress(text: string): string {

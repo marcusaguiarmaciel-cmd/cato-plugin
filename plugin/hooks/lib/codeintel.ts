@@ -10,7 +10,7 @@ export const CODE_EXTENSIONS = new Set([
 
 export const IGNORED_DIRS = new Set([
   '.git', '.claude', '.cato', 'node_modules', 'dist', 'build', 'coverage', '.next', 'target', '__pycache__',
-  '.venv', 'venv', '.tox', '.mypy_cache', '.pytest_cache',
+  '.venv', 'venv', '.tox', '.mypy_cache', '.pytest_cache', 'graphify-out', '.serena',
 ])
 
 export const isCodeFile = (path: string): boolean => {
@@ -138,8 +138,16 @@ function pagerank(nodes: string[], edges: Map<string, Map<string, number>>, pers
   return ranks
 }
 
-/** Mapa do repositório no estilo Aider: arquivos mais centrais primeiro, cada um com seu esqueleto, dentro do orçamento. */
-export function buildRepoMap(files: Map<string, string>, focus: string | undefined, budgetTokens: number): string {
+/**
+ * Mapa do repositório no estilo Aider: arquivos mais centrais primeiro, cada um com seu esqueleto, dentro do orçamento.
+ * `extraEdges` soma relações vindas de fora (o grafo do Graphify) às inferidas pelos símbolos.
+ */
+export function buildRepoMap(
+  files: Map<string, string>,
+  focus: string | undefined,
+  budgetTokens: number,
+  extraEdges?: Map<string, Map<string, number>>,
+): string {
   const names = [...files.keys()]
   if (!names.length) return '# [CATO RepoMap] Nenhum arquivo de código encontrado.'
   const defs = new Map<string, Set<string>>()
@@ -160,6 +168,11 @@ export function buildRepoMap(files: Map<string, string>, focus: string | undefin
     const out = new Map<string, number>()
     for (const w of ws) for (const def of definers.get(w) ?? []) if (def !== name) out.set(def, (out.get(def) ?? 0) + 1)
     edges.set(name, out)
+  }
+  for (const [from, targets] of extraEdges ?? []) {
+    const out = edges.get(from)
+    if (!out) continue
+    for (const [to, weight] of targets) if (files.has(to) && to !== from) out.set(to, (out.get(to) ?? 0) + weight)
   }
   const personal = new Map<string, number>()
   const terms = (focus ?? '').toLowerCase().split(/[^a-z0-9_./-]+/).filter(t => t.length >= 2)

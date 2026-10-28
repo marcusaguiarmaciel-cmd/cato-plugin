@@ -1,7 +1,7 @@
 {
   "name": "cato",
   "displayName": "CATO — Claude Adaptive Token Optimizer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Economia de tokens medida, sem Python: guard de contexto e cache, bloqueio de leituras pesadas, autocompactação, status de custo, compressão de saídas ruidosas e ferramentas de navegação de código.",
   "author": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
   "homepage": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
@@ -66,6 +66,26 @@
       "type": "boolean",
       "title": "Usar Python quando existir",
       "description": "Checagem de sintaxe exata de arquivos .py após edição, só se houver Python na máquina. Sem Python, nada muda.",
+      "default": true
+    },
+    "serenaMaxAnswerChars": {
+      "type": "number",
+      "title": "Serena: limite de resposta (caracteres)",
+      "description": "Aplicado às ferramentas de leitura da Serena quando o modelo não pede um limite (max_answer_chars). Acima dele a Serena pede uma busca mais específica. 0 desliga.",
+      "default": 20000,
+      "min": 0
+    },
+    "astGrepMaxResults": {
+      "type": "number",
+      "title": "ast-grep: máximo de casamentos",
+      "description": "Limite padrão de resultados da busca estrutural (mcp__cato__structural_search e find_code do MCP do ast-grep). 0 desliga.",
+      "default": 60,
+      "min": 0
+    },
+    "compactGithub": {
+      "type": "boolean",
+      "title": "GitHub MCP: compactar respostas",
+      "description": "Remove do JSON os campos que só servem a clientes da API (URLs de API, node_id, avatares, objetos de usuário completos) e os diffs de lockfiles.",
       "default": true
     }
   }
