@@ -98,6 +98,14 @@ test('/cato experimental: ligar vale na hora e persiste; padrão volta a seguir 
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/other-big.ts' })).deny).toBeUndefined()
 })
 
+test('/cato-experimental e /cato-doctor: comandos próprios fazem o mesmo que os subcomandos', async ($, on) => {
+  project(on)
+  const run = async (command: string, args = '') => String(((await $.command.run({ ...CMD(args), command })) as { text?: string }).text)
+  expect(await run('cato-experimental', 'Ligar')).toContain('(escolhido por /cato experimental): readGuard ligado')
+  expect(await run('cato-doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado')
+  expect(await run('cato-experimental', 'padrão')).toContain('(configuração do /plugin): readGuard desligado')
+})
+
 test('/cato experimental desligar vale por cima do /plugin', { options: { readGuard: true, maskColdCompact: true } }, async ($, on) => {
   project(on)
   const text = String(((await $.command.run(CMD('experimental desligar'))) as { text?: string }).text)

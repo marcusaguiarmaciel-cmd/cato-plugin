@@ -1313,6 +1313,14 @@ export const register: Register = (on, rawOptions) => {
         '(importar: sessões anteriores; doctor: diagnóstico; experimental: liga/desliga os recursos experimentais)',
       argumentHint: '[dias | importar | doctor | experimental [ligar|desligar]]',
     })
+    // O menu não mostra argumentos: cada subcomando também tem um comando próprio
+    await $.command.register({ name: 'cato-doctor', description: 'CATO: diagnóstico do que gasta contexto nesta máquina (não altera nada)' })
+    await $.command.register({ name: 'cato-importar', description: 'CATO: importa o custo das sessões anteriores à instalação' })
+    await $.command.register({
+      name: 'cato-experimental',
+      description: 'CATO: mostra, liga ou desliga os recursos experimentais (readGuard e maskColdCompact)',
+      argumentHint: '[ligar | desligar | padrão]',
+    })
     await cleanupOldFiles($)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -1329,6 +1337,14 @@ export const register: Register = (on, rawOptions) => {
     if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '') }
     return { text: await costReport($, days(arg)) }
   })
+
+  on('command.run', { command: 'cato-doctor' }, async $ => ({ text: await doctor($) }))
+  on('command.run', { command: 'cato-importar' }, async ($, _e, next) => ({
+    text: await importHistory($, () => next.budget.remainingMs),
+  }))
+  on('command.run', { command: 'cato-experimental' }, async ($, e) => ({
+    text: await toggleExperimental($, String(e.args ?? '').trim().toLowerCase()),
+  }))
 
   on('tool.call', { tool: 'mcp__cato__cost_report' }, async ($, e) => ({
     result: await costReport($, days((e as unknown as { days?: number }).days)),

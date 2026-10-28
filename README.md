@@ -27,9 +27,9 @@ Requer Claude Code **2.1.290 ou mais novo**.
 | Forks | Pede um subagente com contexto limpo |
 | Ferramentas | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
 | Custo real | `/cato [dias]`: custo por chamada, subagentes à parte, custo por faixa de contexto, cache misses por causa (reconstruções após compactar não contam) e recomendações |
-| Histórico | `/cato importar`: soma as sessões anteriores à instalação a partir dos transcripts, sem contar nada duas vezes. Arquivos acima de 4 MiB passam por awk (Unix) ou PowerShell (Windows) |
-| Diagnóstico | `/cato doctor`: só leitura; resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
-| Experimentais (desligados) | `/cato experimental ligar` liga os dois (`desligar` volta; sem argumento mostra o estado). `readGuard`: Read inteiro de código acima de 60 KB recebe antes o esqueleto, e a segunda tentativa passa. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo |
+| Histórico | `/cato importar` (ou `/cato-importar`): soma as sessões anteriores à instalação a partir dos transcripts, sem contar nada duas vezes. Arquivos acima de 4 MiB passam por awk (Unix) ou PowerShell (Windows) |
+| Diagnóstico | `/cato doctor` (ou `/cato-doctor`): só leitura; resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
+| Experimentais (desligados) | `/cato experimental ligar` (ou `/cato-experimental ligar`) liga os dois (`desligar` volta; sem argumento mostra o estado). `readGuard`: Read inteiro de código acima de 60 KB recebe antes o esqueleto, e a segunda tentativa passa. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo |
 
 As opções ficam no `/plugin`, na configuração do CATO.
 
