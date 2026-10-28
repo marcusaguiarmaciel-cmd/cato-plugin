@@ -87,6 +87,14 @@
       "title": "GitHub MCP: compactar respostas",
       "description": "Remove do JSON os campos que só servem a clientes da API (URLs de API, node_id, avatares, objetos de usuário completos) e os diffs de lockfiles.",
       "default": true
+    },
+    "subagentCacheTtlMinutes": {
+      "type": "number",
+      "title": "Duração do cache de subagentes (minutos)",
+      "description": "5 por padrão, inclusive na assinatura. Use 60 só se você definiu subagentPromptCacheTtl=1h no Claude Code.",
+      "default": 5,
+      "min": 1,
+      "max": 60
     }
   }
 }

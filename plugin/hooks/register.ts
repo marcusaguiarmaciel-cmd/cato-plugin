@@ -41,6 +41,7 @@ type Options = {
   serenaMaxAnswerChars: number
   astGrepMaxResults: number
   compactGithub: boolean
+  subagentCacheTtlMinutes: number
 }
 
 type Day = {
@@ -62,6 +63,11 @@ type Day = {
   rebuildCost: number
   // Chamadas de modelo sem preço conhecido: contadas, mas fora do custo
   unpriced: number
+  // Subagentes: custo à parte do da conversa principal (que segue em `cost`)
+  subCalls: number
+  subCost: number
+  subMisses: number
+  subMissCost: number
   compressions: number
   compressedTokens: number
   blockedReads: number
@@ -112,6 +118,23 @@ let python: string | null | undefined
 let astGrep: string | null | undefined
 let graphCache: { mtimeMs: number; graph: Graph | null } | null = null
 const acks = new Set<string>()
+// Estado de cache de cada subagente, separado do da conversa principal (o guard só olha a principal)
+type AgentCacheState = { lastAt: number; lastModel: string; compactedAt: number }
+const agentStates = new Map<string, AgentCacheState>()
+const MAX_TRACKED_AGENTS = 50
+
+const subagentTtlMinutes = (): number => Math.min(60, Math.max(1, Number(options.subagentCacheTtlMinutes) || 5))
+
+function touchAgent(agentId: string, change: (state: AgentCacheState) => void): void {
+  const state = agentStates.get(agentId) ?? { lastAt: 0, lastModel: '', compactedAt: 0 }
+  change(state)
+  agentStates.delete(agentId) // reinsere no fim: o Map fica em ordem de uso
+  agentStates.set(agentId, state)
+  for (const oldest of agentStates.keys()) {
+    if (agentStates.size <= MAX_TRACKED_AGENTS) break
+    agentStates.delete(oldest)
+  }
+}
 
 // Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h
 const dayKey = (ms: number): string => {
@@ -122,7 +145,7 @@ const dayKey = (ms: number): string => {
 const emptyDay = (): Day => ({
   calls: 0, cost: 0, read: 0, write: 0, output: 0, ctxSum: 0, maxCtx: 0, missIdle: 0, missIdleCost: 0,
   missModel: 0, missModelCost: 0, missOther: 0, missOtherCost: 0, rebuilds: 0, rebuildCost: 0, unpriced: 0,
-  compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0,
+  subCalls: 0, subCost: 0, subMisses: 0, subMissCost: 0, compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0,
 })
 
 /** Preço por milhão de tokens da escrita de cache no TTL dado, ou null para modelo sem preço conhecido. */
@@ -385,12 +408,20 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     line('hoje', sum(1)),
     line('7 dias', sum(7)),
     ...(days === 1 || days === 7 ? [] : [line(`${days} dias`, period)]),
+    ...(period.subCalls
+      ? [
+          `  subagentes (${days} dias): ${usd(period.subCost)} em ${period.subCalls} chamadas — ` +
+            `${Math.round((period.subCost / Math.max(period.cost + period.subCost, 1e-9)) * 100)}% do total ` +
+            `(as linhas acima são só a conversa principal)`,
+        ]
+      : []),
     '',
-    `Cache misses (${days} dias, reescrita > 100k tokens numa chamada):`,
+    `Cache misses da conversa principal (${days} dias, reescrita > 100k tokens numa chamada):`,
     `  pausa maior que o cache   ${period.missIdle}x  ${usd(period.missIdleCost)}`,
     `  troca de modelo           ${period.missModel}x  ${usd(period.missModelCost)}`,
     `  outras (prefixo mudou)    ${period.missOther}x  ${usd(period.missOtherCost)}`,
     `Reconstruções esperadas após compactar (não são misses): ${period.rebuilds}x  ${usd(period.rebuildCost)}`,
+    ...(period.subMisses ? [`Cache misses de subagentes: ${period.subMisses}x  ${usd(period.subMissCost)}`] : []),
     ...(period.unpriced ? [`${period.unpriced} chamadas de modelo sem preço conhecido ficaram fora do custo.`] : []),
     '',
     `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
@@ -402,8 +433,11 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
   if (period.calls && period.ctxSum / period.calls > 300_000) recs.push('O contexto médio passa de 300k: use /clear entre tarefas e /compact quando o CATO avisar.')
   const outputPrice = priceFor(lastModel)?.output
   if (period.cost > 0 && outputPrice && (period.output * outputPrice) / 1e6 / period.cost > 0.1) recs.push('Output passa de 10% do custo: effortLevel alto gera muito raciocínio; use high/medium em tarefas rotineiras.')
+  if (period.subCost > 0 && period.subCost / (period.cost + period.subCost) > 0.3) {
+    recs.push('Subagentes passam de 30% do custo: dê `model: haiku` ou `sonnet` aos de tarefas simples (busca, leitura, testes).')
+  }
   if (recs.length) out.push('', 'O que mais economiza no seu uso:', ...recs.map(r => `  • ${r}`))
-  if (!period.calls) out.push('', 'Ainda não há chamadas registradas: o CATO registra o custo a partir da instalação.')
+  if (!period.calls && !period.subCalls) out.push('', 'Ainda não há chamadas registradas: o CATO registra o custo a partir da instalação.')
   return out.join('\n')
 }
 
@@ -446,8 +480,36 @@ export const register: Register = (on, rawOptions) => {
   on('turn.step', async function* ($, e, next) {
     const result = yield* next(e)
     const usage = result.usage
-    if (!usage || e.agentId) return result
+    if (!usage) return result
     const now = await $.clock.now()
+
+    // Subagente: soma no custo dele, com o TTL dele, sem tocar no estado de cache da conversa principal
+    if (e.agentId) {
+      const agentId = e.agentId
+      const ttlMinutes = subagentTtlMinutes()
+      const cost = usageCost(usage.model, usage as StepUsage, ttlMinutes)
+      const written = usage.cache_creation_input_tokens ?? 0
+      const state = agentStates.get(agentId)
+      // A primeira chamada de um subagente sempre escreve o cache dele: só conta miss de quem já tinha cache
+      const missed =
+        written > MISS_THRESHOLD && !!state && state.lastAt > 0 && !(state.compactedAt > state.lastAt) &&
+        (now - state.lastAt > ttlMinutes * 60_000 || state.lastModel !== usage.model)
+      await bumpDay($, day => {
+        day.subCalls += 1
+        if (cost === null) day.unpriced += 1
+        else day.subCost += cost
+        if (missed) {
+          day.subMisses += 1
+          day.subMissCost += (written * (writePrice(usage.model, ttlMinutes) ?? 0)) / 1e6
+        }
+      })
+      touchAgent(agentId, s => {
+        s.lastAt = now
+        s.lastModel = usage.model
+      })
+      return result
+    }
+
     const ctx = contextTokens(usage as StepUsage)
     const cost = usageCost(usage.model, usage as StepUsage, options.cacheTtlMinutes)
     const written = usage.cache_creation_input_tokens ?? 0
@@ -562,7 +624,17 @@ export const register: Register = (on, rawOptions) => {
   // `precompute` só prepara um resumo para a próxima compactação: nada foi compactado ainda.
   // ---------------------------------------------------------------------------------------------------
   on('session.compact', async ($, e, next) => {
-    if (e.agentId || e.trigger === 'precompute') return next(e)
+    if (e.trigger === 'precompute') return next(e)
+    if (e.agentId) {
+      // Subagente compactado: a próxima escrita grande dele é reconstrução, não miss
+      const agentId = e.agentId
+      const done = await next(e)
+      if (!('skip' in done && done.skip)) {
+        const at = await $.clock.now()
+        touchAgent(agentId, s => { s.compactedAt = at })
+      }
+      return done
+    }
     const diffStat = await git($, ['diff', '--stat'])
     const result = await next(e)
     if (!('skip' in result && result.skip)) {

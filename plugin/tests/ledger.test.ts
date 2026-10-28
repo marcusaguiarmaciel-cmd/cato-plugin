@@ -79,6 +79,31 @@ test('precompute não conta como compactação; a reescrita após /compact é re
   expect(text).toMatch(/Reconstruções esperadas após compactar \(não são misses\): 1x/)
 })
 
+test('subagente: custo à parte com TTL de 5 min e sem mexer no estado de cache da conversa principal', async ($, on) => {
+  const { clock, state } = world(on)
+
+  state.usage = usage('claude-opus-5-5', 200_000, 5_000)
+  await step($)
+  await clock.advance(60_000)
+
+  // subagentes: um em outro modelo; outro escrevendo 1M tokens a preço de 5 min ($5) + output ($0,01)
+  state.usage = usage('claude-haiku-5-5', 0, 0)
+  await step($, 'agent-1')
+  state.usage = usage('claude-opus-5-5', 0, 1_000_000)
+  await step($, 'agent-2')
+  await clock.advance(60_000)
+
+  // se o subagente tivesse sobrescrito lastModel, esta escrita viraria "troca de modelo"
+  state.usage = usage('claude-opus-5-5', 0, 150_000)
+  await step($)
+
+  const text = await report($)
+  expect(text).toMatch(/troca de modelo\s+0x/)
+  expect(text).toMatch(/outras \(prefixo mudou\)\s+1x/)
+  expect(text).toMatch(/subagentes \(30 dias\): \$5\.01 em 2 chamadas/)
+  expect(text).toMatch(/hoje\s+\$\d+\.\d+\s+2 chamadas/)
+})
+
 test('modelo sem preço conhecido não ganha preço de Opus: fica fora do custo e é contado', async ($, on) => {
   const { state } = world(on)
   state.usage = usage('modelo-desconhecido-1', 1_000, 1_000)
