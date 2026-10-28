@@ -394,7 +394,7 @@ async function costReport($: EngineInterface, days: number): Promise<string> {
     ...(period.unpriced ? [`${period.unpriced} chamadas de modelo sem preço conhecido ficaram fora do custo.`] : []),
     '',
     `Intervenções: ${period.guardHolds} prompts segurados, ${period.blockedReads} leituras pesadas negadas, ` +
-      `${period.compressions} saídas comprimidas (−${period.compressedTokens.toLocaleString('pt-BR')} tokens).`,
+      `${period.compressions} saídas comprimidas (≈ −${period.compressedTokens.toLocaleString('pt-BR')} tokens, estimativa por caracteres).`,
   ]
   const recs: string[] = []
   if (period.cost > 0 && period.missIdleCost / period.cost > 0.03) recs.push('Ao voltar de uma pausa longa, use /clear ou /compact em vez de continuar com contexto grande.')
@@ -607,8 +607,8 @@ export const register: Register = (on, rawOptions) => {
       const rawTokens = estimateTokens(stdout)
       if (rawTokens < 160 || stdout.length > 30_000) return ran // acima disso o Claude Code já entrega arquivo + prévia
       const astGrepText = AST_GREP_JSON_RE.test(command) ? formatAstGrepMatches(stdout, 0, 20_000) : null
-      const { text, changed, strategy } = astGrepText
-        ? { text: astGrepText, changed: true, strategy: 'ast_grep_json' }
+      const { text, changed, strategy, omittedErrors } = astGrepText
+        ? { text: astGrepText, changed: true, strategy: 'ast_grep_json', omittedErrors: 0 }
         : optimizeOutput(command, stdout)
       const optimized = estimateTokens(text)
       if (!changed || (rawTokens - optimized < 80 && optimized > rawTokens * 0.85)) return ran
@@ -619,7 +619,13 @@ export const register: Register = (on, rawOptions) => {
         day.compressions += 1
         day.compressedTokens += rawTokens - optimized
       })
-      const footer = `\n[CATO #${id} (${strategy}): ${rawTokens} -> ${optimized} tokens (-${rawTokens - optimized} tok). Log bruto completo: ${logPath}]`
+      const warning = omittedErrors > 0
+        ? `\n⚠ [CATO] ${omittedErrors} linhas de erro não mostradas acima. Busque no log com ` +
+          `mcp__cato__search_sandbox id="${id}" query="error" (ou o termo da falha).`
+        : ''
+      const footer =
+        `${warning}\n[CATO #${id} (${strategy}): ≈${rawTokens} -> ≈${optimized} tokens estimados (−${rawTokens - optimized}). ` +
+        `Log bruto completo: ${logPath}]`
       return { ...ran, result: { ...result, stdout: text + footer } } as typeof ran
     }).catch(($, e, next) => (next.called ? Promise.reject(new Error('CATO: falha após rodar o comando')) : next(e)))
   }
@@ -718,7 +724,7 @@ export const register: Register = (on, rawOptions) => {
       ? '\nDica: no GitHub MCP, `fields`, `perPage`, `detail: "none"` (get_commit) e `tail_lines` (get_job_logs) reduzem a resposta.'
       : ''
     const summary =
-      `[CATO MCP Sandbox #${id} — ${rawTokens} tokens guardados em ${chunks.length} blocos]\n` +
+      `[CATO MCP Sandbox #${id} — ≈${rawTokens} tokens (estimativa) guardados em ${chunks.length} blocos]\n` +
       `A resposta de ${tool} (${lines.length} linhas) foi indexada para proteger o contexto.\n` +
       `Para buscar termos nela, chame a ferramenta mcp__cato__search_sandbox com id="${id}".${hint}\n\n` +
       `--- Prévia (primeiras 15 linhas) ---\n${preview}\n... [+${Math.max(0, lines.length - 15)} linhas em #${id}]`
