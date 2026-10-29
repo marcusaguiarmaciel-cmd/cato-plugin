@@ -1,7 +1,7 @@
 {
   "name": "cato",
   "displayName": "CATO: Claude Adaptive Token Optimizer",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Cuts Claude Code's token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation, with Serena, Graphify, ast-grep and GitHub MCP integration. Speaks English, Portuguese and Spanish.",
   "author": {
     "name": "Marcus Maciel",
@@ -15,9 +15,6 @@
     "prompt-caching",
     "context-engineering",
     "cost"
-  ],
-  "agents": [
-    "./agents/cato-explorer.md"
   ],
   "userConfig": {
     "language": {
@@ -128,6 +125,25 @@
       "type": "boolean",
       "title": "Mask old results when compacting with a cold cache (experimental)",
       "description": "With an expired cache, large tool results outside the last 10 exchanges become one line before the summary. With a warm cache nothing changes.",
+      "default": false
+    },
+    "sandboxMinTokens": {
+      "type": "number",
+      "title": "MCP sandbox: minimum size (tokens)",
+      "description": "MCP responses above this become a searchable sandbox with the start and end shown. Repeating the same call brings it whole. App, terminal and browser tools are never sandboxed.",
+      "default": 6000,
+      "min": 500
+    },
+    "sandboxSkip": {
+      "type": "string",
+      "title": "MCP sandbox: tools always whole (regex)",
+      "description": "Regular expression over the tool name (e.g. mcp__clickup__|mcp__notion__). Matching tools always come back whole.",
+      "default": ""
+    },
+    "warmCache": {
+      "type": "boolean",
+      "title": "Keep the cache warm during short pauses (experimental)",
+      "description": "With a large context and the session idle, one small call shortly before the cache expires keeps it warm (at most 2 per pause). /cato shows what it cost and what it saved.",
       "default": false
     }
   }

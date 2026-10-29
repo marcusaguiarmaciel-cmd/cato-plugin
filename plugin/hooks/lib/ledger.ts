@@ -43,6 +43,10 @@ export type Day = {
   sandboxTokens: number
   masks: number
   maskedTokens: number
+  // Cache aquecido em pausas (opção warmCache): chamadas feitas, quanto custaram e a reescrita que evitaram
+  warms: number
+  warmCost: number
+  warmSaved: number
 }
 
 export type Ledger = { days: Record<string, Day> }
@@ -53,6 +57,7 @@ export const emptyDay = (): Day => ({
   subCalls: 0, subCost: 0, subMisses: 0, subMissCost: 0, band0: 0, band1: 0, band2: 0, band3: 0,
   compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0, readGuardDenies: 0, readGuardBypass: 0,
   blockedTokens: 0, readGuardTokens: 0, sandboxed: 0, sandboxTokens: 0, masks: 0, maskedTokens: 0,
+  warms: 0, warmCost: 0, warmSaved: 0,
 })
 
 // Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h

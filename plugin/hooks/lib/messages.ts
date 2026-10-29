@@ -36,6 +36,8 @@ const en = {
     bandsTitle: 'Main conversation cost by context size',
     bandCols: ['Context', 'Cost', 'Share'],
     savingsTitle: 'Tokens saved',
+    warmLine: (n: string, cost: string, saved: string) =>
+      `Cache kept warm (warmCache, experimental): ${n} calls cost ${cost} and avoided ${saved} of cache rewrites when you came back.`,
     savingsNote: 'RTK as measured by rtk gain; the rest estimated from characters.',
     savingsCols: ['Intervention', 'Times', 'Tokens'],
     saved: {
@@ -108,6 +110,10 @@ const en = {
     mcpMany: (n: string) => `${n} MCP servers configured: turn off the ones you don't use in /mcp (a CLI like gh costs less context).`,
     mcpCount: (n: string) => `${n} MCP servers configured.`,
     betasDisabled: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is set: it turns off tool search (MCP tools enter the context in full).',
+    fixedNone: 'No measurement of tool descriptions or reminders yet (recorded from the next session).',
+    fixedTools: (provider: string, n: string, tokens: string, deferred: string) =>
+      `Tools from ${provider}: ${n} (${deferred} behind ToolSearch), ≈ ${tokens} tokens of descriptions in the last session.`,
+    fixedReminders: (type: string, n: string, tokens: string) => `Reminder "${type}": ${n}×, ≈ ${tokens} tokens in total.`,
     opusplan: 'model=opusplan: every entry into and exit from plan mode switches models and re-reads the conversation without cache.',
     mainTtlDefault: (cato: string) => `Main conversation TTL is Claude Code's default (1h on a subscription, 5 min with an API key); CATO uses ${cato} min.`,
     mainTtlMismatch: (cc: string, cato: string) => `Claude Code caches the main conversation for ${cc} min and CATO computes with ${cato}: adjust cacheTtlMinutes.`,
@@ -214,6 +220,8 @@ const pt: Messages = {
     bandsTitle: 'Custo da conversa principal por tamanho de contexto',
     bandCols: ['Contexto', 'Custo', 'Parcela'],
     savingsTitle: 'Tokens economizados',
+    warmLine: (n, cost, saved) =>
+      `Cache mantido quente (warmCache, experimental): ${n} chamadas custaram ${cost} e evitaram ${saved} de reescritas de cache na sua volta.`,
     savingsNote: 'RTK medido pelo rtk gain; o resto estimado por caracteres.',
     savingsCols: ['Intervenção', 'Vezes', 'Tokens'],
     saved: {
@@ -285,6 +293,10 @@ const pt: Messages = {
     mcpMany: n => `${n} servidores MCP configurados: desative em /mcp os que não usa (uma CLI como o gh custa menos contexto).`,
     mcpCount: n => `${n} servidores MCP configurados.`,
     betasDisabled: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS está definido: desliga o tool search (ferramentas MCP entram inteiras no contexto).',
+    fixedNone: 'Ainda não há medição de descrições de ferramentas nem de lembretes (registra a partir da próxima sessão).',
+    fixedTools: (provider, n, tokens, deferred) =>
+      `Ferramentas de ${provider}: ${n} (${deferred} atrás do ToolSearch), ≈ ${tokens} tokens de descrições na última sessão.`,
+    fixedReminders: (type, n, tokens) => `Lembrete "${type}": ${n}×, ≈ ${tokens} tokens no total.`,
     opusplan: 'model=opusplan: cada entrada e saída do plan mode troca de modelo e relê a conversa sem cache.',
     mainTtlDefault: cato => `TTL da conversa principal no padrão do Claude Code (1h na assinatura, 5 min com chave de API); o CATO usa ${cato} min.`,
     mainTtlMismatch: (cc, cato) => `O Claude Code usa ${cc} min de cache na conversa principal e o CATO calcula com ${cato}: ajuste cacheTtlMinutes.`,
@@ -388,6 +400,8 @@ const es: Messages = {
     bandsTitle: 'Costo de la conversación principal por tamaño de contexto',
     bandCols: ['Contexto', 'Costo', 'Parte'],
     savingsTitle: 'Tokens ahorrados',
+    warmLine: (n, cost, saved) =>
+      `Caché mantenida caliente (warmCache, experimental): ${n} llamadas costaron ${cost} y evitaron ${saved} de reescrituras de caché a tu regreso.`,
     savingsNote: 'RTK medido por rtk gain; el resto estimado por caracteres.',
     savingsCols: ['Intervención', 'Veces', 'Tokens'],
     saved: {
@@ -459,6 +473,10 @@ const es: Messages = {
     mcpMany: n => `${n} servidores MCP configurados: desactiva en /mcp los que no uses (una CLI como gh cuesta menos contexto).`,
     mcpCount: n => `${n} servidores MCP configurados.`,
     betasDisabled: 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS está definido: desactiva el tool search (las herramientas MCP entran completas en el contexto).',
+    fixedNone: 'Todavía no hay medición de descripciones de herramientas ni de recordatorios (se registra desde la próxima sesión).',
+    fixedTools: (provider, n, tokens, deferred) =>
+      `Herramientas de ${provider}: ${n} (${deferred} tras ToolSearch), ≈ ${tokens} tokens de descripciones en la última sesión.`,
+    fixedReminders: (type, n, tokens) => `Recordatorio "${type}": ${n}×, ≈ ${tokens} tokens en total.`,
     opusplan: 'model=opusplan: cada entrada y salida del plan mode cambia de modelo y relee la conversación sin caché.',
     mainTtlDefault: cato => `TTL de la conversación principal por defecto de Claude Code (1h con suscripción, 5 min con clave de API); CATO usa ${cato} min.`,
     mainTtlMismatch: (cc, cato) => `Claude Code usa ${cc} min de caché en la conversación principal y CATO calcula con ${cato}: ajusta cacheTtlMinutes.`,

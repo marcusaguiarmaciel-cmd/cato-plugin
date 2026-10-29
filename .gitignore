@@ -1,3 +1,5 @@
 # Tipos que o Claude Code gera ao carregar o mod
 plugin/.claude-plugin/types/
 node_modules/
+# Resultados locais das evals (custo e traces de cada execução)
+plugin/evals/results/

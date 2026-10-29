@@ -55,6 +55,9 @@ type Options = {
   readGuard: boolean
   maskColdCompact: boolean
   language: string
+  sandboxMinTokens: number
+  sandboxSkip: string
+  warmCache: boolean
 }
 
 // O que o resumo da compactação deve guardar: recall primeiro (guia de context engineering da Anthropic),
@@ -67,6 +70,22 @@ const CATO_COMPACT =
 /** Instruções do CATO para a compactação; string vazia nas opções desliga. */
 const compactInstructions = (): string =>
   typeof options.compactInstructions === 'string' ? options.compactInstructions.trim() : CATO_COMPACT
+
+// Explorador do CATO: Haiku, sem CLAUDE.md e só com ferramentas de leitura. Os passos citam apenas as
+// ferramentas que esta máquina tem, para o agente não tentar uma que não foi registrada.
+const EXPLORER_PROMPT = (hasGraph: boolean, hasAstGrep: boolean): string =>
+  [
+    "You are CATO's explorer. Find what was asked while spending as few tokens as possible, and return only the conclusion.",
+    hasGraph
+      ? '1. Read `graphify-out/GRAPH_REPORT.md` first and use `mcp__cato__graph_query` for the terms in the question; else start with `mcp__cato__repo_map` and `focus`.'
+      : '1. Start with `mcp__cato__repo_map` and `focus`.',
+    hasAstGrep
+      ? '2. For code patterns (a call, a decorator, a signature), use `mcp__cato__structural_search` (ast-grep) instead of Grep.'
+      : '2. Use Grep with a precise pattern and `glob`/`type` filters.',
+    '3. To read a function or class, use `mcp__cato__read_symbol`; for large files, `Read` with `offset`/`limit` on the `[L<start>-L<end>]` ranges.',
+    '4. Do not read dependencies, build output, lockfiles, `graphify-out/graph.json` or secret files (`.env`, keys).',
+    '5. Answer with paths and lines (`file:line`) and a short summary, in the language the question was asked in. Do not paste whole files.',
+  ].join('\n')
 
 // Abaixo disso, trocar de modelo custa pouco e o aviso só atrapalharia
 const MODEL_SWITCH_MIN_CONTEXT = 50_000
@@ -99,19 +118,169 @@ const HEAVY_FILE_RE = /(^|[\\/])(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|C
 // O grafo bruto e o cache do Graphify: o resumo está no GRAPH_REPORT.md e a consulta no graph_query
 const GRAPHIFY_HEAVY_RE = /(^|[\\/])graphify-out[\\/](graph\.json|cache([\\/]|$))/
 const SENSITIVE_RE = /(^|[\\/])(\.env(\..*)?|id_rsa[^\\/]*|id_ed25519[^\\/]*|[^\\/]*\.(pem|key|p12|pfx)|[^\\/]*(credentials|secret)[^\\/]*)$/i
-// Respostas MCP que não viram sandbox: as do próprio CATO e as de navegação/tela (imagens, estado de página)
-const SKIP_MCP = /^mcp__(cato|claude[_-]browser|claude[_-]in[_-]chrome|computer[_-]use|playwright|puppeteer|chrome|browser|computer)__/i
+// Respostas MCP que não viram sandbox: as do próprio CATO, as de navegação/tela (imagens, estado de página) e
+// as do app (sessões, terminal, painéis, tarefas agendadas), que o modelo precisa ler inteiras para agir
+const SKIP_MCP =
+  /^mcp__(cato|claude[_-]browser|claude[_-]in[_-]chrome|computer[_-]use|playwright|puppeteer|chrome|browser|computer|ccd_[a-z_]+|terminal|visualize|scheduled[_-]tasks|mcp[_-]registry|plugin[_-]authoring)__/i
+// Campos com que o modelo já limita a resposta: ele escolheu o tamanho, então ela chega inteira
+const MCP_LIMIT_KEYS = ['limit', 'max_results', 'maxResults', 'per_page', 'perPage', 'page_size', 'pageSize', 'max_tokens', 'max_chars', 'max_answer_chars', 'tail_lines', 'fields']
+// Prévia de uma resposta guardada: começo e fim, por caracteres (JSON minificado é uma linha só)
+const SANDBOX_PREVIEW_CHARS = 1_500
+
+const HEAVY_RETRY = ' If you really need it, make the same call again: the second attempt goes through.'
 
 /** Por que ler este caminho só encheria o contexto, ou null se a leitura é normal. */
 function heavyReason(path: string): string | null {
   if (GRAPHIFY_HEAVY_RE.test(path)) {
-    return `[CATO] ${path} is Graphify's raw graph. Read ${GRAPHIFY_REPORT} for the overview or use mcp__cato__graph_query for a term.`
+    return `[CATO] ${path} is Graphify's raw graph. Read ${GRAPHIFY_REPORT} for the overview or use mcp__cato__graph_query for a term.` + HEAVY_RETRY
   }
   if (HEAVY_DIR_RE.test(path) || HEAVY_FILE_RE.test(path)) {
     return `[CATO] ${path} is a dependency, build output or lockfile: reading it only fills the context. ` +
-      "Read the project's source instead, or ask the user explicitly if you really need this file."
+      "Read the project's source instead." + HEAVY_RETRY
   }
   return null
+}
+
+// Pasta pesada só pelo nome (build/, dist/, target/...) pode ser código-fonte versionado: o git decide.
+// Cache por pasta; fora de um repositório git (ou sem git) vale o nome.
+const ignoredDirCache = new Map<string, boolean>()
+
+async function isIgnoredHeavyDir($: EngineInterface, path: string): Promise<boolean> {
+  const normalized = path.replace(/\\/g, '/')
+  const match = /^(.*?(?:^|\/)(?:node_modules|dist|build|coverage|\.next|target|\.venv|venv))(?:\/|$)/.exec(normalized)
+  if (!match) return false
+  const dir = match[1]
+  const known = ignoredDirCache.get(dir)
+  if (known !== undefined) return known
+  const r = await $.process.run(['git', 'check-ignore', '-q', dir], { timeoutMs: 3000 }).catch(() => null)
+  // 0: ignorado; 1: versionado ou não ignorado; outro código: não é repositório git ou não há git
+  const ignored = !r || r.exitCode !== 1
+  ignoredDirCache.set(dir, ignored)
+  return ignored
+}
+
+// Texto do último prompt digitado: um caminho citado nele foi pedido pela pessoa, e a leitura passa
+let lastPromptText = ''
+
+/**
+ * Motivo para negar a leitura de `path` pela ferramenta `tool`, ou null para deixar passar. Nega só na primeira
+ * tentativa: repetir a mesma chamada, ou citar o caminho no prompt, libera (o modelo nunca fica travado).
+ */
+async function heavyDenial($: EngineInterface, tool: string, path: string): Promise<string | null> {
+  const reason = heavyReason(path)
+  if (!reason) return null
+  const normalized = path.replace(/\\/g, '/')
+  const base = normalized.split('/').pop() ?? normalized
+  const prompt = lastPromptText.toLowerCase()
+  if (prompt && (prompt.includes(normalized.toLowerCase()) || (base.length > 3 && prompt.includes(base.toLowerCase())))) return null
+  const key = `heavy:${tool}:${normalized}`
+  if (acks.has(key)) {
+    // Pedido de novo: a leitura entra e a economia creditada na negação sai do relatório
+    const credit = heavyCredit.get(key) ?? 0
+    heavyCredit.delete(key)
+    await bumpDay($, day => {
+      day.blockedReads -= 1
+      day.blockedTokens -= credit
+    })
+    return null
+  }
+  const byNameOnly = !GRAPHIFY_HEAVY_RE.test(path) && !HEAVY_FILE_RE.test(path)
+  if (byNameOnly && !(await isIgnoredHeavyDir($, path))) return null
+  acks.add(key)
+  return reason
+}
+
+// -------------------------------------------------------------------------------------------------------
+// Cache aquecido (experimental, opção warmCache): com contexto grande e a sessão parada, uma pergunta mínima
+// por fork pouco antes do TTL expirar relê o prefixo em cache (≈ 0,1× o preço de entrada) e o mantém vivo,
+// em vez de uma reescrita (1,25× ou 2×) quando a pessoa voltar. No máximo WARM_MAX por pausa.
+// -------------------------------------------------------------------------------------------------------
+const WARM_MAX = 2
+const WARM_LEAD_MS = 3 * 60_000
+const WARM_PROMPT = 'Cache keep-alive from the CATO plugin. Reply with only: ok'
+let warmTimer: { cancel: () => void } | null = null
+let warmsThisPause = 0
+// Última chamada real (não de aquecimento) antes da pausa: decide se a volta teria encontrado o cache frio
+let pauseSince = 0
+
+function cancelWarm(): void {
+  warmTimer?.cancel()
+  warmTimer = null
+}
+
+function scheduleWarm($: EngineInterface): void {
+  cancelWarm()
+  if (!options.warmCache || warmsThisPause >= WARM_MAX || lastCtx < IDLE_MIN_CONTEXT || ttlMs <= WARM_LEAD_MS) return
+  try {
+    warmTimer = $.clock.after(ttlMs - WARM_LEAD_MS, () => void warmNow($).catch(() => undefined))
+  } catch {
+    warmTimer = null
+  }
+}
+
+// Enquanto o fork de aquecimento roda, o turn.step dele (se houver) não conta como volta da pessoa
+let warming = false
+
+async function warmNow($: EngineInterface): Promise<void> {
+  warmTimer = null
+  const now = await $.clock.now()
+  // Houve atividade depois do agendamento: o cache já está quente
+  if (now - lastStepAt < ttlMs - WARM_LEAD_MS - 1000 || compactedAt > lastStepAt) return
+  const stepBefore = lastStepAt
+  warming = true
+  const r = await $.model.fork({ prompt: WARM_PROMPT }).catch(() => null).finally(() => { warming = false })
+  if (!r || !('usage' in r) || !r.usage) return
+  const usage = r.usage as unknown as StepUsage
+  const cost = usageCost(lastModel, usage, options.cacheTtlMinutes) ?? 0
+  warmsThisPause += 1
+  // Se o fork não passou pelo turn.step, o custo ainda não está no total do dia
+  const counted = lastStepAt !== stepBefore
+  if (!counted) lastStepAt = await $.clock.now()
+  await bumpDay($, day => {
+    day.warms += 1
+    day.warmCost += cost
+    if (!counted) {
+      day.calls += 1
+      day.cost += cost
+    }
+  })
+  await saveSnapshot($)
+  scheduleWarm($)
+}
+
+/** Na volta da pessoa: credita a reescrita evitada se, sem os aquecimentos, o cache teria expirado. */
+async function settleWarm($: EngineInterface, now: number, model: string): Promise<void> {
+  cancelWarm()
+  if (warmsThisPause > 0 && pauseSince && now - pauseSince > ttlMs && now - lastStepAt <= ttlMs) {
+    const write = writePrice(model)
+    const read = priceFor(model)?.read
+    if (write !== null && read !== undefined) {
+      const avoided = (lastCtx * (write - read)) / 1e6
+      await bumpDay($, day => { day.warmSaved += Math.max(0, avoided) })
+    }
+  }
+  warmsThisPause = 0
+}
+
+// Tokens creditados em cada negação de leitura pesada, descontados se a mesma leitura for pedida de novo
+const heavyCredit = new Map<string, number>()
+// O mesmo para respostas MCP guardadas em sandbox e pedidas de novo
+const sandboxCredit = new Map<string, number>()
+
+const sandboxMinTokens = (): number => Math.max(500, Number(options.sandboxMinTokens) || 6_000)
+
+let sandboxSkipRe: RegExp | null | undefined
+/** Ferramentas MCP que a pessoa quer sempre inteiras (opção `sandboxSkip`, regex sobre o nome da ferramenta). */
+function sandboxSkipped(tool: string): boolean {
+  if (sandboxSkipRe === undefined) {
+    const raw = String(options.sandboxSkip ?? '').trim()
+    try {
+      sandboxSkipRe = raw ? new RegExp(raw, 'i') : null
+    } catch {
+      sandboxSkipRe = null
+    }
+  }
+  return !!sandboxSkipRe && sandboxSkipRe.test(tool)
 }
 
 // Configuração e estado da sessão. O estado recomeça a cada reload do módulo, sem prejuízo: no máximo um
@@ -179,15 +348,136 @@ async function loadLedger($: EngineInterface): Promise<Ledger> {
   return raw && typeof raw === 'object' && 'days' in raw ? (raw as Ledger) : { days: {} }
 }
 
-async function bumpDay($: EngineInterface, change: (day: Day) => void): Promise<void> {
-  const ledger = await loadLedger($)
-  const key = dayKey(await $.clock.now())
-  const day = { ...emptyDay(), ...(ledger.days[key] ?? {}) }
-  change(day)
-  ledger.days[key] = day
-  const keys = Object.keys(ledger.days).sort()
-  for (const old of keys.slice(0, Math.max(0, keys.length - LEDGER_DAYS))) delete ledger.days[old]
-  await $.store.set(LEDGER_KEY, ledger)
+// Gravações no $.store em fila: hooks concorrentes (subagentes em paralelo, várias ferramentas) não se
+// sobrescrevem, e as mudanças que chegam enquanto uma gravação roda saem juntas na seguinte
+let storeChain: Promise<void> = Promise.resolve()
+let pendingDays: ((day: Day) => void)[] = []
+let pendingSnapshot = false
+
+function serial($: EngineInterface): Promise<void> {
+  storeChain = storeChain.then(() => drainStore($)).catch(() => undefined)
+  return storeChain
+}
+
+async function drainStore($: EngineInterface): Promise<void> {
+  const changes = pendingDays
+  const snapshot = pendingSnapshot
+  pendingDays = []
+  pendingSnapshot = false
+  if (changes.length) {
+    // Lê o valor atual logo antes de gravar: outra sessão pode ter gravado no meio tempo
+    const ledger = await loadLedger($)
+    const key = dayKey(await $.clock.now())
+    const day = { ...emptyDay(), ...(ledger.days[key] ?? {}) }
+    for (const change of changes) change(day)
+    ledger.days[key] = day
+    const keys = Object.keys(ledger.days).sort()
+    for (const old of keys.slice(0, Math.max(0, keys.length - LEDGER_DAYS))) delete ledger.days[old]
+    await $.store.set(LEDGER_KEY, ledger)
+  }
+  if (snapshot) await writeSnapshot($)
+  await writeFixed($)
+}
+
+function bumpDay($: EngineInterface, change: (day: Day) => void): Promise<void> {
+  pendingDays.push(change)
+  return serial($)
+}
+
+// -------------------------------------------------------------------------------------------------------
+// Custo fixo medido (só observa: o que vai para a API não muda). Descrições de ferramentas por provedor na
+// sessão atual e lembretes injetados pelo motor por tipo, em caracteres; nunca o texto. Base para cortes.
+// -------------------------------------------------------------------------------------------------------
+const FIXED_KEY = 'fixed'
+type FixedRow = { count: number; chars: number; deferred?: number }
+type Fixed = { tools: Record<string, FixedRow>; attachments: Record<string, FixedRow> }
+const seenTools = new Map<string, { provider: string; chars: number; deferred: boolean }>()
+let toolsDirty = false
+const pendingAttachments: Record<string, FixedRow> = {}
+
+async function loadFixed($: EngineInterface): Promise<Fixed> {
+  const raw = (await $.store.get(FIXED_KEY).catch(() => undefined)) as Partial<Fixed> | undefined
+  return { tools: raw?.tools ?? {}, attachments: raw?.attachments ?? {} }
+}
+
+async function writeFixed($: EngineInterface): Promise<void> {
+  const attachmentTypes = Object.keys(pendingAttachments)
+  if (!toolsDirty && !attachmentTypes.length) return
+  const fixed = await loadFixed($)
+  if (toolsDirty) {
+    const tools: Record<string, FixedRow> = {}
+    for (const { provider, chars, deferred } of seenTools.values()) {
+      const row = (tools[provider] ??= { count: 0, chars: 0, deferred: 0 })
+      row.count += 1
+      row.chars += chars
+      if (deferred) row.deferred = (row.deferred ?? 0) + 1
+    }
+    fixed.tools = tools
+    toolsDirty = false
+  }
+  for (const type of attachmentTypes) {
+    const row = (fixed.attachments[type] ??= { count: 0, chars: 0 })
+    row.count += pendingAttachments[type].count
+    row.chars += pendingAttachments[type].chars
+    delete pendingAttachments[type]
+  }
+  await $.store.set(FIXED_KEY, fixed)
+}
+
+function providerName(provider: unknown): string {
+  if (!provider || typeof provider !== 'object') return String(provider ?? 'unknown')
+  const p = provider as { kind?: string; name?: string; server?: string; plugin?: string; tier?: string }
+  return String(p.name ?? p.server ?? p.plugin ?? p.kind ?? 'unknown')
+}
+
+// -------------------------------------------------------------------------------------------------------
+// Retrato do cache da conversa principal por sessão: o guard continua sabendo quando foi a última chamada
+// depois de um reload do módulo ou de reabrir o app (as variáveis do módulo recomeçam do zero)
+// -------------------------------------------------------------------------------------------------------
+const SESSIONS_KEY = 'sessions'
+const MAX_SESSIONS = 50
+type Snapshot = { lastStepAt: number; lastModel: string; lastCtx: number; compactedAt: number }
+
+async function sessionId($: EngineInterface): Promise<string | null> {
+  try {
+    const id = await $.session.id()
+    return id ? String(id) : null
+  } catch {
+    return null
+  }
+}
+
+async function loadSessions($: EngineInterface): Promise<Record<string, Snapshot>> {
+  const raw = await $.store.get(SESSIONS_KEY).catch(() => undefined)
+  return raw && typeof raw === 'object' ? (raw as Record<string, Snapshot>) : {}
+}
+
+async function writeSnapshot($: EngineInterface): Promise<void> {
+  const id = await sessionId($)
+  if (!id) return
+  const sessions = await loadSessions($)
+  delete sessions[id] // reinsere no fim: as mais antigas saem primeiro
+  sessions[id] = { lastStepAt, lastModel, lastCtx, compactedAt }
+  const ids = Object.keys(sessions)
+  for (const old of ids.slice(0, Math.max(0, ids.length - MAX_SESSIONS))) delete sessions[old]
+  await $.store.set(SESSIONS_KEY, sessions)
+}
+
+function saveSnapshot($: EngineInterface): Promise<void> {
+  pendingSnapshot = true
+  return serial($)
+}
+
+/** Recupera o retrato desta sessão se o módulo acabou de carregar (nada medido ainda nesta vida do módulo). */
+async function restoreSnapshot($: EngineInterface): Promise<void> {
+  if (lastStepAt) return
+  const id = await sessionId($)
+  const saved = id ? (await loadSessions($))[id] : undefined
+  if (!saved || !(Number(saved.lastStepAt) > 0)) return
+  lastStepAt = Number(saved.lastStepAt)
+  lastModel = String(saved.lastModel ?? '')
+  lastCtx = Number(saved.lastCtx) || 0
+  compactedAt = Number(saved.compactedAt) || 0
 }
 
 async function homeDir($: EngineInterface): Promise<string> {
@@ -256,7 +546,7 @@ async function detectLanguage($: EngineInterface): Promise<void> {
 // -------------------------------------------------------------------------------------------------------
 async function refreshStatus($: EngineInterface): Promise<void> {
   const usage = await $.session.usage()
-  const ctx = usage.context.tokens ?? lastCtx
+  const ctx = usage.context?.tokens ?? lastCtx
   if (!ctx) return $.ui.status(undefined)
   const model = lastModel || (await $.session.model())
   const price = priceFor(model)
@@ -424,7 +714,7 @@ async function structuralSearch($: EngineInterface, input: { pattern: string; la
     throw new Error(`${target} is outside the project (${root}).`)
   }
   if (SENSITIVE_RE.test(absolute)) throw new Error(`${target} looks like it holds secrets; CATO does not read it.`)
-  const reason = heavyReason(target)
+  const reason = await heavyDenial($, 'structural_search', target)
   if (reason) throw new Error(reason.replace('[CATO] ', ''))
   const args = [bin, 'run', '--pattern', input.pattern, '--json=stream', ...(input.lang ? ['--lang', input.lang] : []), target]
   const r = await $.process.run(args, { timeoutMs: 30_000 })
@@ -581,6 +871,9 @@ async function costReport($: EngineInterface, days: number, width = 100): Promis
   if (period.subCost > 0 && period.subCost / (period.cost + period.subCost) > 0.3) recs.push(m.recs.subagents)
   if (period.readGuardDenies >= 5 && period.readGuardBypass / period.readGuardDenies > 0.3) recs.push(m.recs.readGuard)
   if (period.cost > 0 && period.band3 / period.cost > 0.3) recs.push(m.recs.band400)
+  if (period.warms > 0) {
+    out.push('', ...wrap(m.warmLine(f.int(period.warms), f.money(period.warmCost), f.money(period.warmSaved)), width))
+  }
   if (recs.length) out.push('', `▸ ${m.recsTitle}`, ...recs.flatMap(r => bullet('•', r, width)))
 
   out.push('')
@@ -884,6 +1177,16 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
   }
   mcpServers.length > 10 ? warn(m.mcpMany(f.int(mcpServers.length))) : info(m.mcpCount(f.int(mcpServers.length)))
   if (envOr('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS', await $.env.get('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'))) warn(m.betasDisabled)
+  // Medido nesta máquina: descrições de ferramentas da última sessão e lembretes injetados pelo motor
+  await serial($)
+  const fixed = await loadFixed($)
+  const top = (rows: Record<string, FixedRow>) =>
+    Object.entries(rows).sort((a, b) => b[1].chars - a[1].chars).slice(0, 5)
+  const tools = top(fixed.tools)
+  const reminders = top(fixed.attachments)
+  if (!tools.length && !reminders.length) info(m.fixedNone)
+  for (const [provider, row] of tools) info(m.fixedTools(provider, f.int(row.count), f.tokens(Math.round(row.chars / 3.8)), f.int(row.deferred ?? 0)))
+  for (const [type, row] of reminders) info(m.fixedReminders(type, f.int(row.count), f.tokens(Math.round(row.chars / 3.8))))
 
   section(m.cache)
   const model = String(setting('model') ?? '')
@@ -1041,7 +1344,7 @@ export const register: Register = (on, rawOptions) => {
       written <= MISS_THRESHOLD ? null
         : compactedAt > lastStepAt ? 'rebuild'
           : lastStepAt && now - lastStepAt > ttlMs ? 'idle'
-            : lastModel && lastModel !== usage.model ? 'model'
+            : lastModel && (sameModel(lastModel, usage.model) ?? lastModel === usage.model) === false ? 'model'
               : 'other'
     await bumpDay($, day => {
       day.calls += 1
@@ -1061,8 +1364,38 @@ export const register: Register = (on, rawOptions) => {
     lastStepAt = now
     lastModel = usage.model
     lastCtx = ctx
+    await saveSnapshot($)
+    if (!warming) {
+      pauseSince = now
+      warmsThisPause = 0
+      scheduleWarm($)
+    }
     return result
   })
+
+  // Medição do custo fixo: observa a resposta do motor e a devolve igual (o prefixo do cache não muda)
+  on('tool.describe', async ($, e, next) => {
+    const result = await next(e)
+    seenTools.set(String(e.tool), {
+      provider: providerName(e.provider),
+      chars: String(result.description ?? '').length,
+      deferred: !!result.isDeferred,
+    })
+    toolsDirty = true
+    void serial($)
+    return result
+  }).catch(($, e, next) => next(e))
+
+  on('prompt.attachment', async ($, e, next) => {
+    const result = await next(e)
+    if (typeof result.text === 'string' && result.text) {
+      const row = (pendingAttachments[String(e.type)] ??= { count: 0, chars: 0 })
+      row.count += 1
+      row.chars += result.text.length
+      void serial($)
+    }
+    return result
+  }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
     const result = await next(e)
@@ -1081,7 +1414,13 @@ export const register: Register = (on, rawOptions) => {
       return { ...e, context: [...(e.context ?? []), extra] }
     }
     const typed = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-    if (!options.guard || e.command || e.isMeta || !typed || compactedAt > lastStepAt) return next(withPending())
+    if (typed && !e.command && !e.isMeta) lastPromptText = String(e.text ?? '').slice(0, 20_000)
+    if (typed && !e.command && !e.isMeta && warmsThisPause) {
+      await settleWarm($, await $.clock.now(), lastModel || (await $.session.model())).catch(() => undefined)
+    }
+    if (!options.guard || e.command || e.isMeta || !typed) return next(withPending())
+    await restoreSnapshot($).catch(() => undefined)
+    if (compactedAt > lastStepAt) return next(withPending())
 
     const usage = await $.session.usage()
     const ctx = usage.context.tokens ?? lastCtx
@@ -1204,6 +1543,7 @@ export const register: Register = (on, rawOptions) => {
     const result = await next(toSummarize)
     if (!('skip' in result && result.skip)) {
       compactedAt = await $.clock.now()
+      await saveSnapshot($)
       for (const key of [...acks]) if (key.startsWith('ctx:')) acks.delete(key)
       if (diffStat) {
         pendingContext = `[CATO: uncommitted changes after compaction (git diff --stat)]\n${diffStat.slice(0, 800)}`
@@ -1221,10 +1561,11 @@ export const register: Register = (on, rawOptions) => {
       if (!options.blockHeavyReads) return next(e)
       const input = e as unknown as { file_path?: string; path?: string }
       const target = String(input.file_path ?? input.path ?? '')
-      const reason = target ? heavyReason(target) : null
+      const reason = target ? await heavyDenial($, String(e.tool), target) : null
       if (!reason) return next(e)
       // Só o Read tem tamanho conhecido; Grep e Glob negados contam sem tokens
       const size = e.tool === 'Read' ? (await $.fs.stat(target).catch(() => null))?.size ?? 0 : 0
+      heavyCredit.set(`heavy:${String(e.tool)}:${target.replace(/\\/g, '/')}`, readTokens(size))
       await bumpDay($, day => {
         day.blockedReads += 1
         day.blockedTokens += readTokens(size)
@@ -1352,7 +1693,7 @@ export const register: Register = (on, rawOptions) => {
 
     // Leituras pesadas pelas ferramentas de código e do GitHub, como no Read
     const target = family && family !== 'graphify' ? mcpTargetPath(input) : ''
-    const reason = options.blockHeavyReads && target ? heavyReason(target) : null
+    const reason = options.blockHeavyReads && target ? await heavyDenial($, tool, target) : null
     if (reason) {
       await bumpDay($, day => { day.blockedReads += 1 })
       return { deny: reason }
@@ -1396,7 +1737,21 @@ export const register: Register = (on, rawOptions) => {
     }
 
     const rawTokens = estimateTokens(text)
-    if (rawTokens < 1500) return current
+    if (rawTokens < sandboxMinTokens() || sandboxSkipped(tool)) return current
+    // O modelo já limitou a resposta (limit, perPage, fields...): ele escolheu o tamanho
+    if (MCP_LIMIT_KEYS.some(key => input[key] !== undefined && input[key] !== null && input[key] !== '')) return current
+    // A mesma chamada de novo: o modelo precisa da resposta inteira, e ela entra (a economia creditada sai)
+    const { tool_use_id: _id, consent: _consent, ...args } = input
+    const repeatKey = `sbx:${tool}:${JSON.stringify(args)}`
+    if (acks.has(repeatKey)) {
+      const credit = sandboxCredit.get(repeatKey) ?? 0
+      sandboxCredit.delete(repeatKey)
+      await bumpDay($, day => {
+        day.sandboxed -= 1
+        day.sandboxTokens -= credit
+      })
+      return current
+    }
     const id = `sbx_${randomId()}`
     const chunks = chunkLines(text)
     const saved = await $.fs
@@ -1405,18 +1760,25 @@ export const register: Register = (on, rawOptions) => {
       .catch(() => false)
     if (!saved) return current
     const lines = text.split('\n')
-    const preview = lines.slice(0, 15).map(l => l.slice(0, 160)).join('\n').slice(0, 1200)
+    const head = text.slice(0, SANDBOX_PREVIEW_CHARS)
+    const tail = text.slice(-SANDBOX_PREVIEW_CHARS)
+    const omitted = text.length - head.length - tail.length
     const hint = family === 'github'
       ? '\nTip: in the GitHub MCP, `fields`, `perPage`, `detail: "none"` (get_commit) and `tail_lines` (get_job_logs) shrink the response.'
       : ''
     const summary =
       `[CATO MCP Sandbox #${id} — ≈${rawTokens} tokens (estimate) stored in ${chunks.length} chunks]\n` +
-      `The response from ${tool} (${lines.length} lines) was indexed to protect the context.\n` +
-      `To search it, call mcp__cato__search_sandbox with id="${id}".${hint}\n\n` +
-      `--- Preview (first 15 lines) ---\n${preview}\n... [+${Math.max(0, lines.length - 15)} lines in #${id}]`
+      `The response from ${tool} (${lines.length} lines) was indexed to protect the context. ` +
+      `Search it with mcp__cato__search_sandbox id="${id}", or repeat the same call to get it whole.${hint}\n\n` +
+      (omitted > 0
+        ? `--- Start ---\n${head}\n... [${omitted} characters in #${id}] ...\n--- End ---\n${tail}`
+        : `--- Preview ---\n${text.slice(0, SANDBOX_PREVIEW_CHARS * 2)}`)
+    const credit = Math.max(0, rawTokens - estimateTokens(summary))
+    acks.add(repeatKey)
+    sandboxCredit.set(repeatKey, credit)
     await bumpDay($, day => {
       day.sandboxed += 1
-      day.sandboxTokens += Math.max(0, rawTokens - estimateTokens(summary))
+      day.sandboxTokens += credit
     })
     return withText(ran, summary)
   })
@@ -1425,80 +1787,98 @@ export const register: Register = (on, rawOptions) => {
   // Ferramentas do CATO para o modelo e o comando /cato
   // ---------------------------------------------------------------------------------------------------
   on('session.start', async ($, e, next) => {
+    await restoreSnapshot($).catch(() => undefined)
+    // O conjunto de ferramentas e agentes vai em toda requisição e faz parte do prefixo do cache: é decidido
+    // uma vez aqui e não muda no meio da sessão. Ferramenta de integração ausente não é registrada.
+    const [hasAstGrep, hasGraph] = await Promise.all([
+      findAstGrep($).then(Boolean).catch(() => false),
+      $.fs.exists(GRAPHIFY_JSON).catch(() => false),
+    ])
     await $.tool.register({
       name: 'repo_map',
-      description:
-        'Compact repository map: the most central files (Personalized PageRank over who uses whose symbols), ' +
-        'each with its declarations and line ranges [L<start>-L<end>]. Use it before exploring with several rounds of Glob/Grep/Read.',
+      description: 'Ranked repo map (PageRank over symbol use): central files with declarations and [L<start>-L<end>]. Use before several Glob/Grep/Read rounds.',
       inputSchema: {
         type: 'object',
         properties: {
-          focus: { type: 'string', description: 'Terms or paths to prioritize in the ranking' },
-          token_budget: { type: 'number', description: 'Maximum token budget (default 1200)' },
+          focus: { type: 'string', description: 'Terms or paths to rank first' },
+          token_budget: { type: 'number', description: 'Default 1200' },
         },
       },
     })
     await $.tool.register({
       name: 'read_symbol',
-      description:
-        'Reads only the definition of a class, function or method (`Class`, `function` or `Class.method`) with line numbers, ' +
-        'instead of the whole file. Honors the Read permission rules.',
+      description: 'Reads one class/function/method (`Class`, `fn`, `Class.method`) with line numbers instead of the whole file.',
       inputSchema: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: 'File path, relative to the project or absolute' },
-          symbol: { type: 'string', description: 'Symbol name' },
+          file_path: { type: 'string' },
+          symbol: { type: 'string' },
         },
         required: ['file_path', 'symbol'],
       },
     })
     await $.tool.register({
       name: 'search_sandbox',
-      description: 'Searches (BM25) a large MCP response CATO stored in a sandbox (id sbx_xxxxxxxx) or a raw command log (cmd_xxxxxxxx).',
+      description: 'BM25 search in a response CATO stored (sbx_xxxxxxxx) or a raw command log (cmd_xxxxxxxx).',
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'sbx_xxxxxxxx or cmd_xxxxxxxx' },
-          query: { type: 'string', description: 'Search terms' },
+          id: { type: 'string' },
+          query: { type: 'string' },
         },
         required: ['id', 'query'],
       },
     })
-    await $.tool.register({
-      name: 'structural_search',
-      description:
-        'Structural search with ast-grep (matches the syntax tree, not text): e.g. `console.log($A)`, `def $F($$$):`, ' +
-        '`useEffect($$$)`. Returns `file:L<start>-L<end>` and the snippet, compact and capped. Prefer it to Grep for code patterns.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          pattern: { type: 'string', description: 'ast-grep pattern; $A matches one node, $$$ matches many' },
-          lang: { type: 'string', description: 'Language (ts, tsx, js, py, go, rs, java...); optional when the extension is enough' },
-          path: { type: 'string', description: 'Folder or file inside the project (default: the whole project)' },
-          max_results: { type: 'number', description: 'Maximum matches (default 60)' },
+    if (hasAstGrep) {
+      await $.tool.register({
+        name: 'structural_search',
+        description: 'ast-grep syntax-tree search (e.g. `console.log($A)`, `def $F($$$):`); compact `file:L<start>-L<end>` hits. Prefer to Grep for code patterns.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string', description: '$A one node, $$$ many' },
+            lang: { type: 'string', description: 'ts, py, go...; optional' },
+            path: { type: 'string', description: 'Inside the project; default all' },
+            max_results: { type: 'number', description: 'Default 60' },
+          },
+          required: ['pattern'],
         },
-        required: ['pattern'],
-      },
-    })
-    await $.tool.register({
-      name: 'graph_query',
-      description:
-        'Queries the Graphify knowledge graph (graphify-out/graph.json) without loading it into the context: nodes matching the term, ' +
-        'where they are (file:line), their community and relations to neighbors.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          term: { type: 'string', description: 'Name of a concept, class, function or file' },
-          limit: { type: 'number', description: 'Maximum nodes (default 12)' },
+      })
+    }
+    if (hasGraph) {
+      await $.tool.register({
+        name: 'graph_query',
+        description: 'Queries the Graphify graph without loading it: matching nodes, file:line, community and neighbors.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            term: { type: 'string' },
+            limit: { type: 'number', description: 'Default 12' },
+          },
+          required: ['term'],
         },
-        required: ['term'],
-      },
-    })
+      })
+    }
     await $.tool.register({
       name: 'cost_report',
-      description: "Real cost recorded by CATO (per API call): today, 7 and 30 days, average context, cache misses by cause, tokens saved and recommendations. Written in the user's language.",
+      description: "CATO's recorded real cost: periods, cache misses by cause, tokens saved, advice.",
       inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
     })
+    await $.agent
+      .register({
+        name: 'cato-explorer',
+        description: 'Broad codebase exploration (find symbols across files, trace dependencies) so raw reads stay out of the main context.',
+        prompt: EXPLORER_PROMPT(hasGraph, hasAstGrep),
+        tools: [
+          'Read', 'Grep', 'Glob', 'mcp__cato__repo_map', 'mcp__cato__read_symbol',
+          ...(hasAstGrep ? ['mcp__cato__structural_search'] : []),
+          ...(hasGraph ? ['mcp__cato__graph_query'] : []),
+        ],
+        model: 'haiku',
+        maxTurns: 18,
+        omitClaudeMd: true,
+      })
+      .catch(() => undefined)
     await detectLanguage($)
     const c = t().commands
     await $.command.register({ name: 'cato', description: c.cato, argumentHint: c.catoHint })

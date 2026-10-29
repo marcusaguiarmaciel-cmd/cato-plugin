@@ -46,14 +46,17 @@ O que só o modelo lê (negações, rodapés de compressão, descrições de fer
 | Instruções de compactação | Quando ninguém deu instruções (autocompactação, `/compact` sem texto), o resumo guarda objetivo, decisões, arquivos alterados, erros abertos e próximos passos, sem saídas brutas (`compactInstructions`; o texto do seu `/compact` prevalece) |
 | Troca de modelo | Com o cache quente, avisa quanto custa reler a conversa no novo modelo (inclui o seletor do app, `opusplan` e skills com outro modelo); nunca segura o prompt |
 | Status de custo | Contexto, custo do próximo turno e minutos até o cache expirar (convive com a sua `statusLine`) |
-| Leituras pesadas | Nega Read/Grep/Glob em `node_modules`, builds, venvs, lockfiles e `*.min.*` |
+| Leituras pesadas | Nega Read/Grep/Glob em lockfiles, `*.min.*` e em `node_modules`, builds e venvs **só quando o git os ignora** (um `src/build/` versionado é lido normalmente). Repetir a mesma chamada, ou citar o caminho no seu prompt, libera |
+| Sandbox MCP | Respostas acima de `sandboxMinTokens` (6.000) viram um sandbox pesquisável que mostra o começo e o fim; repetir a mesma chamada traz a resposta inteira. Ferramentas do app, do terminal, de navegador e do próprio CATO, respostas que o modelo já limitou (`limit`, `perPage`, `fields`…) e ferramentas que casam com `sandboxSkip` chegam sempre inteiras |
+| Guard entre reloads | Horário, modelo e contexto da última chamada ficam guardados por sessão no store do CATO: o guard de cache continua valendo depois de um reload do plugin ou de reabrir o app |
+| Custo fixo | `structural_search` e `graph_query` só aparecem quando existem ast-grep e Graphify; as descrições das ferramentas são curtas; o `cato-explorer` roda no Haiku sem `CLAUDE.md`. O `/cato-doctor` mostra o tamanho medido das descrições de ferramentas e dos lembretes injetados |
 | Compressão de saídas | Testes, linters, instalações e builds no Bash/PowerShell; log bruto em `~/.cato/logs`. Falhas têm prioridade: quando passam do limite, a saída diz quantas linhas de erro ficaram de fora e como buscá-las no log |
 | Sintaxe | JSON sempre; `.py` só se houver Python na máquina |
 | Pós-compactação | `git diff --stat` devolvido ao modelo no próximo prompt (branch e status o Claude Code já relê) |
 | Forks | Pede um subagente com contexto limpo |
 | Ferramentas | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
 | Import do histórico | Arquivos acima de 4 MiB passam pelo awk (no Windows, o do Git for Windows, mesmo fora do PATH) ou, sem awk, pelo PowerShell; leituras interrompidas são retomadas na próxima execução |
-| Experimentais (desligados) | `readGuard`: o Read inteiro de código acima de 60 KB recebe antes o esqueleto, e pedir de novo libera. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo |
+| Experimentais (desligados) | `readGuard`: o Read inteiro de código acima de 60 KB recebe antes o esqueleto, e pedir de novo libera. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo. `warmCache` (no `/plugin`): com contexto grande e a sessão parada, uma chamada mínima 3 minutos antes de o cache expirar o mantém quente (no máximo 2 por pausa); o `/cato` mostra quanto custou e quanto evitou |
 
 As opções ficam no `/plugin`, na configuração do CATO.
 
