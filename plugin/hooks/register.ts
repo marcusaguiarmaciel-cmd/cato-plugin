@@ -1978,7 +1978,7 @@ export const register: Register = (on, rawOptions) => {
     const experimental = arg.match(/^experimenta(?:l|is|les)(?:\s+(.+))?$/)
     if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '', width) }
     return { text: await costReport($, days(arg), width) }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'cato-doctor' }, async ($, e) => {
     await detectLanguage($)
@@ -1987,7 +1987,7 @@ export const register: Register = (on, rawOptions) => {
   on('command.run', { command: 'cato-import' }, async ($, e, next) => {
     await detectLanguage($)
     return { text: await importHistory($, () => next.budget.remainingMs, columns(e)) }
-  })
+  }).catch(($, e, next) => next(e))
   on('command.run', { command: 'cato-experimental' }, async ($, e) => {
     await detectLanguage($)
     return { text: await toggleExperimental($, String(e.args ?? ''), columns(e)) }
@@ -1996,12 +1996,12 @@ export const register: Register = (on, rawOptions) => {
   on('tool.call', { tool: 'mcp__cato__cost_report' }, async ($, e) => {
     await detectLanguage($)
     return { result: await costReport($, days((e as unknown as { days?: number }).days)) }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__cato__repo_map' }, async ($, e) => {
     const input = e as unknown as { focus?: string; token_budget?: number }
     return { result: await repoMap($, input.focus, Number(input.token_budget) || 1200) }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__cato__structural_search' }, async ($, e) => {
     const input = e as unknown as { pattern: string; lang?: string; path?: string; max_results?: number }
@@ -2011,12 +2011,12 @@ export const register: Register = (on, rawOptions) => {
     } catch (error) {
       return { deny: `[CATO] ${(error as Error).message}` }
     }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__cato__graph_query' }, async ($, e) => {
     const input = e as unknown as { term?: string; limit?: number }
     return { result: await graphQuery($, String(input.term ?? ''), Math.max(1, Math.min(50, Number(input.limit) || 12))) }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__cato__read_symbol' }, async ($, e) => {
     const input = e as unknown as { file_path: string; symbol: string }
@@ -2025,7 +2025,7 @@ export const register: Register = (on, rawOptions) => {
     } catch (error) {
       return { deny: `[CATO] ${(error as Error).message}` }
     }
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__cato__search_sandbox' }, async ($, e) => {
     const input = e as unknown as { id: string; query: string }
@@ -2036,5 +2036,5 @@ export const register: Register = (on, rawOptions) => {
     } catch {
       return { deny: `[CATO] ${id} not found (sandboxes and logs are deleted after ${RAW_FILE_DAYS} days).` }
     }
-  })
+  }).catch(($, e, next) => next(e))
 }

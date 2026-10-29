@@ -15,7 +15,6 @@ Requer Claude Code **2.1.290 ou mais novo**.
 /plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
 ```
 
-
 ## Idioma
 
 Relatórios, avisos e a linha de status saem em **inglês, português ou espanhol**. O CATO escolhe o idioma nesta ordem:
