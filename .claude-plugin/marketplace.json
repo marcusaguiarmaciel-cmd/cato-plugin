@@ -1,14 +1,17 @@
 {
   "name": "cato",
-  "owner": { "name": "Marcus Maciel", "url": "https://github.com/marcusaguiarmaciel-cmd" },
+  "owner": {
+    "name": "Marcus Maciel",
+    "url": "https://github.com/marcusaguiarmaciel-cmd"
+  },
   "plugins": [
     {
       "name": "cato",
       "source": "./plugin",
-      "description": "Reduz o custo de tokens do Claude Code com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente, com integração a Serena, Graphify, ast-grep e GitHub MCP."
+      "description": "Cuts Claude Code's token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation, with Serena, Graphify, ast-grep and GitHub MCP integration. Speaks English, Portuguese and Spanish."
     }
   ],
   "metadata": {
-    "description": "Plugins de otimização de custo e de contexto para o Claude Code."
+    "description": "Cost and context optimization plugins for Claude Code."
   }
 }

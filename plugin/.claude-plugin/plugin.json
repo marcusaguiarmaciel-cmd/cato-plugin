@@ -1,8 +1,8 @@
 {
   "name": "cato",
   "displayName": "CATO: Claude Adaptive Token Optimizer",
-  "version": "1.2.4",
-  "description": "Reduz o custo de tokens do Claude Code com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente, com integração a Serena, Graphify, ast-grep e GitHub MCP.",
+  "version": "1.3.0",
+  "description": "Cuts Claude Code's token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation, with Serena, Graphify, ast-grep and GitHub MCP integration. Speaks English, Portuguese and Spanish.",
   "author": {
     "name": "Marcus Maciel",
     "url": "https://github.com/marcusaguiarmaciel-cmd"
@@ -20,108 +20,114 @@
     "./agents/cato-explorer.md"
   ],
   "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Language of CATO's reports, warnings and status line: auto, en, pt or es. auto follows Claude Code's `language` setting, then the system locale; unsupported languages fall back to English.",
+      "default": "auto"
+    },
     "guard": {
       "type": "boolean",
-      "title": "Guard de contexto e cache",
-      "description": "Avisa quando o contexto cruza as faixas configuradas e segura uma vez o prompt quando o cache expirou e continuar custaria caro.",
+      "title": "Context and cache guard",
+      "description": "Warns when the context crosses the configured bands and holds the prompt once when the cache expired and continuing would be expensive.",
       "default": true
     },
     "guardBlockUsd": {
       "type": "number",
-      "title": "Custo mínimo para segurar o prompt (USD)",
-      "description": "Com o cache expirado, o prompt só é segurado se reescrever o contexto custar pelo menos este valor. 0 desliga o bloqueio (só avisa).",
+      "title": "Minimum cost to hold the prompt (USD)",
+      "description": "With an expired cache, the prompt is held only if rewriting the context costs at least this much. 0 turns holding off (warning only).",
       "default": 1,
       "min": 0
     },
     "contextWarn": {
       "type": "string",
-      "title": "Faixas de aviso de contexto (tokens)",
-      "description": "Lista separada por vírgulas. Cada faixa avisa uma vez por sessão (de novo após /compact).",
+      "title": "Context warning bands (tokens)",
+      "description": "Comma-separated list. Each band warns once per session (again after /compact).",
       "default": "250000,400000,600000"
     },
     "cacheTtlMinutes": {
       "type": "number",
-      "title": "Duração do cache (minutos)",
-      "description": "60 na assinatura (TTL de 1h); 5 com chave de API.",
+      "title": "Cache duration (minutes)",
+      "description": "60 on a subscription (1h TTL); 5 with an API key.",
       "default": 60,
       "min": 1
     },
     "autoCompactPercent": {
       "type": "number",
-      "title": "Autocompactar ao atingir (% da janela)",
-      "description": "Compacta antes do próximo prompt quando o contexto passa deste percentual da janela. 0 desliga.",
+      "title": "Auto-compact at (% of the window)",
+      "description": "Compacts before the next prompt when the context passes this share of the window. 0 turns it off.",
       "default": 65,
       "min": 0,
       "max": 100
     },
     "blockHeavyReads": {
       "type": "boolean",
-      "title": "Bloquear leituras pesadas",
-      "description": "Nega leitura de node_modules, dist, build, coverage, .next, target, venvs, lockfiles e bundles minificados.",
+      "title": "Block heavy reads",
+      "description": "Denies reading node_modules, dist, build, coverage, .next, target, venvs, lockfiles and minified bundles.",
       "default": true
     },
     "compressShell": {
       "type": "boolean",
-      "title": "Comprimir saídas ruidosas do shell",
-      "description": "Testes, linters, instalações, builds e logs de container. Saídas de dados nunca são alteradas.",
+      "title": "Compress noisy shell output",
+      "description": "Tests, linters, installs, builds and container logs. Data output is never changed.",
       "default": true
     },
     "disableForks": {
       "type": "boolean",
-      "title": "Evitar forks de subagente",
-      "description": "Um fork copia o contexto inteiro da conversa para o subagente; o CATO pede um subagente com contexto limpo em vez disso.",
+      "title": "Avoid subagent forks",
+      "description": "A fork copies the whole conversation into the subagent; CATO asks for a subagent with a clean context instead.",
       "default": true
     },
     "pythonChecks": {
       "type": "boolean",
-      "title": "Usar Python quando existir",
-      "description": "Checagem de sintaxe exata de arquivos .py após edição, só se houver Python na máquina. Sem Python, nada muda.",
+      "title": "Use Python when available",
+      "description": "Exact syntax check of .py files after edits, only if Python is installed. Without Python, nothing changes.",
       "default": true
     },
     "serenaMaxAnswerChars": {
       "type": "number",
-      "title": "Serena: limite de resposta (caracteres)",
-      "description": "Aplicado às ferramentas de leitura da Serena quando o modelo não pede um limite (max_answer_chars). Acima dele a Serena pede uma busca mais específica. 0 desliga.",
+      "title": "Serena: answer limit (characters)",
+      "description": "Applied to Serena's read tools when the model does not ask for a limit (max_answer_chars). Above it, Serena asks for a narrower query. 0 turns it off.",
       "default": 20000,
       "min": 0
     },
     "astGrepMaxResults": {
       "type": "number",
-      "title": "ast-grep: máximo de casamentos",
-      "description": "Limite padrão de resultados da busca estrutural (mcp__cato__structural_search e find_code do MCP do ast-grep). 0 desliga.",
+      "title": "ast-grep: maximum matches",
+      "description": "Default result limit for structural search (mcp__cato__structural_search and the ast-grep MCP's find_code). 0 turns it off.",
       "default": 60,
       "min": 0
     },
     "compactGithub": {
       "type": "boolean",
-      "title": "GitHub MCP: compactar respostas",
-      "description": "Remove do JSON os campos que só servem a clientes da API (URLs de API, node_id, avatares, objetos de usuário completos) e os diffs de lockfiles.",
+      "title": "GitHub MCP: compact responses",
+      "description": "Strips JSON fields only API clients need (API URLs, node_id, avatars, full user objects) and lockfile diffs.",
       "default": true
     },
     "subagentCacheTtlMinutes": {
       "type": "number",
-      "title": "Duração do cache de subagentes (minutos)",
-      "description": "5 por padrão, inclusive na assinatura. Use 60 só se você definiu subagentPromptCacheTtl=1h no Claude Code.",
+      "title": "Subagent cache duration (minutes)",
+      "description": "5 by default, even on a subscription. Use 60 only if you set subagentPromptCacheTtl=1h in Claude Code.",
       "default": 5,
       "min": 1,
       "max": 60
     },
     "compactInstructions": {
       "type": "string",
-      "title": "Instruções de compactação",
-      "description": "O que o resumo deve guardar quando ninguém deu instruções (autocompactação, /compact sem texto). Vazio desliga; o texto do seu /compact sempre prevalece.",
-      "default": "Mantenha o objetivo atual e os pedidos do usuário ainda abertos; as decisões tomadas e o motivo de cada uma; os caminhos dos arquivos alterados; erros e testes que ainda falham, com a mensagem exata; e os próximos passos. Não reproduza conteúdo de arquivos, saídas de ferramentas nem logs: cite caminhos e os IDs #cmd_/#sbx_ do CATO. Seja conciso."
+      "title": "Compaction instructions",
+      "description": "What the summary should keep when nobody gave instructions (auto-compaction, /compact with no text). Empty turns it off; the text of your /compact always wins.",
+      "default": "Keep the current goal and the user's open requests; the decisions made and why; the paths of changed files; errors and failing tests with the exact message; and the next steps. Do not reproduce file contents, tool output or logs: cite paths and CATO's #cmd_/#sbx_ IDs. Be concise and write the summary in the conversation's language."
     },
     "readGuard": {
       "type": "boolean",
-      "title": "Esqueleto em leitura grande (experimental)",
-      "description": "Read inteiro de arquivo de código acima de 60 KB recebe antes o esqueleto com as linhas de cada declaração; a segunda tentativa passa. O /cato mostra quantas vezes foi pedido de novo.",
+      "title": "Outline on large reads (experimental)",
+      "description": "A full Read of a code file over 60 KB first gets the outline with each declaration's lines; asking again lets it through. /cato shows how often it was requested again.",
       "default": false
     },
     "maskColdCompact": {
       "type": "boolean",
-      "title": "Mascarar resultados antigos ao compactar com cache frio (experimental)",
-      "description": "Com o cache expirado, resultados de ferramenta grandes e fora das 10 últimas trocas viram uma linha antes do resumo. Com o cache quente nada muda.",
+      "title": "Mask old results when compacting with a cold cache (experimental)",
+      "description": "With an expired cache, large tool results outside the last 10 exchanges become one line before the summary. With a warm cache nothing changes.",
       "default": false
     }
   }

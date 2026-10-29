@@ -1,65 +1,87 @@
 # CATO: Claude Adaptive Token Optimizer
 
-Plugin para o Claude Code que reduz o custo de tokens com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente. Roda inteiramente dentro do Claude Code, sem Python e sem processos externos por hook, e se integra a Serena, Graphify, ast-grep e GitHub MCP.
+[Português](README.pt-BR.md)
 
-## Instalação
+A Claude Code plugin that cuts token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation. It runs entirely inside Claude Code, with no Python and no external process per hook, and integrates with Serena, Graphify, ast-grep and GitHub MCP.
 
-Requer Claude Code **2.1.290 ou mais novo**.
+## Install
+
+Requires Claude Code **2.1.290 or newer**.
 
 ```
 /plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
 ```
 
 
-## O que faz
+## Language
 
-| Recurso | Como |
+Reports, warnings and the status line come in **English, Portuguese or Spanish**. CATO picks the language in this order:
+
+1. The `language` option in CATO's settings (`/plugin`): `auto` (default), `en`, `pt` or `es`.
+2. Claude Code's `language` setting (for example `"language": "portuguese"` in `settings.json`).
+3. The system locale (`LC_ALL`, `LC_MESSAGES`, `LANG`, or the OS locale).
+4. English. A configured language CATO does not support also falls back to English.
+
+What only the model reads (denials, compression footers, tool descriptions, the skill) is always in English: it costs fewer tokens and works with any conversation language. `/cato-doctor` shows which language is in use and where it came from.
+
+## Commands
+
+| Command | What it shows |
 |---|---|
-| Guard de contexto/cache | Avisa por faixa de contexto e segura **uma vez** o prompt quando o cache expirou e reescrevê-lo custaria ≥ `guardBlockUsd` |
-| Autocompactação | Compacta antes do prompt ao passar de `autoCompactPercent` % da janela |
-| Instruções de compactação | Quando ninguém deu instruções (autocompactação, `/compact` sem texto), o resumo guarda objetivo, decisões, arquivos alterados, erros abertos e próximos passos, sem saídas brutas (`compactInstructions`; o texto do seu `/compact` prevalece) |
-| Troca de modelo | Com o cache quente, avisa quanto custa reler a conversa no novo modelo (inclui seletor do app, `opusplan` e skills com outro modelo); nunca segura o prompt |
-| Status de custo | Contexto, custo do próximo turno e minutos até o cache expirar (convive com a sua `statusLine`) |
-| Leituras pesadas | Nega Read/Grep/Glob em `node_modules`, builds, venvs, lockfiles e `*.min.*` |
-| Compressão de saídas | Testes, linters, instalações e builds no Bash/PowerShell; log bruto em `~/.cato/logs`. Falhas têm prioridade: quando passam do limite, a saída diz quantas linhas de erro ficaram de fora e como buscá-las no log |
-| Sintaxe | JSON sempre; `.py` só se houver Python na máquina |
-| Pós-compactação | `git diff --stat` devolvido ao modelo no próximo prompt (branch e status o Claude Code já relê) |
-| Forks | Pede um subagente com contexto limpo |
-| Ferramentas | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
-| Custo real | `/cato [dias]`: custo por chamada, subagentes à parte, custo por faixa de contexto, cache misses por causa (reconstruções após compactar não contam), tokens gastos e tokens economizados por intervenção, incluindo o RTK via `rtk gain` (com o valor estimado em dólar) e recomendações |
-| Histórico | `/cato importar` (ou `/cato-importar`): soma as sessões anteriores à instalação a partir dos transcripts, sem contar nada duas vezes. Arquivos acima de 4 MiB passam por awk (no Windows, o do Git for Windows mesmo fora do PATH) ou, sem awk, pelo PowerShell; leituras interrompidas são retomadas na próxima execução |
-| Diagnóstico | `/cato doctor` (ou `/cato-doctor`): só leitura; resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
-| Experimentais (desligados) | `/cato experimental ligar` (ou `/cato-experimental ligar`) liga os dois (`desligar` volta; sem argumento mostra o estado). `readGuard`: Read inteiro de código acima de 60 KB recebe antes o esqueleto, e a segunda tentativa passa. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo |
+| `/cato [days]` | Real cost per period, cache misses by cause, cost by context size, tokens saved per intervention (including RTK via `rtk gain`) and recommendations. Default: 30 days |
+| `/cato-import` | Adds sessions from before the install, read from the transcripts, without counting anything twice |
+| `/cato-doctor` | Read-only diagnostics: language, leftovers of the Python version, double auto-compaction, integrations, `CLAUDE.md` over 200 lines, too many MCP servers, `opusplan` and mismatched TTLs |
+| `/cato-experimental [on\|off\|default]` | Shows or toggles the experimental features |
 
-As opções ficam no `/plugin`, na configuração do CATO.
+`/cato import`, `/cato doctor` and `/cato experimental …` also work. Portuguese and Spanish words are accepted too (`ligar`, `desligar`, `padrão`, `activar`, `desactivar`, `predeterminado`).
 
-### Limites conhecidos
+## What it does
 
-- O custo em dólar é preço de lista; na assinatura, mede o consumo do plano, não uma fatura.
-- O TTL das escritas ao vivo vem das opções (`cacheTtlMinutes`, `subagentCacheTtlMinutes`): a API de mods não separa escritas de 5 min e de 1 h. O import usa o valor exato do transcript. Confira com `/cato doctor`.
-- Trocas de fast mode e de effort (fora dos modelos 5.5) também invalidam o cache, mas a API de mods não as expõe: aparecem como "outras".
-- O import só conta chamadas anteriores ao primeiro dia registrado ao vivo; a parte desse dia anterior à instalação fica de fora.
-
-## Integrações
-
-Todas são detectadas sozinhas: sem a ferramenta instalada, nada muda.
-
-| Ferramenta | O que o CATO faz com ela |
+| Feature | How |
 |---|---|
-| **Serena MCP** | Aplica um limite de resposta (`serenaMaxAnswerChars`, padrão 20.000 caracteres) às ferramentas de leitura quando o modelo não pede um; nega leituras pesadas por `relative_path`; checa a sintaxe de `.json`/`.py` depois das edições da Serena; não manda as respostas dela para o sandbox, porque já vêm localizadas |
-| **Graphify** | `repo_map` soma as relações de `graphify-out/graph.json` ao ranking; nova ferramenta `mcp__cato__graph_query` consulta o grafo sem carregá-lo; leitura do `graph.json` e do cache é negada em favor do `GRAPH_REPORT.md` |
-| **ast-grep** | Nova ferramenta `mcp__cato__structural_search` (busca pela árvore sintática, resultado `arquivo:L<início>-L<fim>` compacto); `ast-grep ... --json` no Bash vira uma linha por casamento; `find_code` do MCP do ast-grep recebe `max_results` (`astGrepMaxResults`, padrão 60) |
-| **GitHub MCP** | Tira do JSON os campos de API (`*_url`, `node_id`, avatares, usuário completo vira só o login, labels viram nomes) e os diffs de lockfiles (`compactGithub`); nega `get_file_contents` de lockfiles; o que continuar grande vai para o sandbox com dicas de `fields`/`perPage` |
+| Context/cache guard | Warns per context band and holds the prompt **once** when the cache expired and rewriting it would cost ≥ `guardBlockUsd` |
+| Auto-compaction | Compacts before the prompt once the context passes `autoCompactPercent` % of the window |
+| Compaction instructions | When nobody gave instructions (auto-compaction, `/compact` with no text), the summary keeps the goal, decisions, changed files, open errors and next steps, without raw output (`compactInstructions`; your `/compact` text wins) |
+| Model switch | With a warm cache, shows what re-reading the conversation in the new model costs (includes the app's picker, `opusplan` and skills with another model); never holds the prompt |
+| Cost status | Context, next turn's cost and minutes until the cache expires (lives alongside your `statusLine`) |
+| Heavy reads | Denies Read/Grep/Glob on `node_modules`, builds, venvs, lockfiles and `*.min.*` |
+| Output compression | Tests, linters, installs and builds in Bash/PowerShell; raw log in `~/.cato/logs`. Failures come first: when they pass the limit, the output says how many error lines were left out and how to search the log |
+| Syntax | JSON always; `.py` only if Python is installed |
+| After compaction | `git diff --stat` handed to the model on the next prompt (Claude Code already re-reads branch and status) |
+| Forks | Asks for a subagent with a clean context |
+| Tools | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
+| History import | Files over 4 MiB go through awk (on Windows, Git for Windows' awk even outside the PATH) or, without awk, PowerShell; interrupted reads resume on the next run |
+| Experimental (off) | `readGuard`: a full Read of a code file over 60 KB first gets the outline, and asking again lets it through. `maskColdCompact`: with an expired cache, large old tool results become one line before the summary |
 
-A skill `cato-efficiency` e o agente `cato-explorer` dizem ao modelo qual ferramenta usar primeiro quando cada uma está disponível.
+Options live in `/plugin`, in CATO's settings.
 
-## Desenvolvimento
+### Known limits
+
+- The dollar cost is list price; on a subscription it measures plan usage, not a bill.
+- The TTL of live writes comes from the options (`cacheTtlMinutes`, `subagentCacheTtlMinutes`): the mods API does not tell 5-minute and 1-hour writes apart. The import uses the exact value from the transcript. Check with `/cato-doctor`.
+- Fast-mode and effort switches (outside the 5.5 models) also invalidate the cache, but the mods API does not expose them: they show up as "other".
+- The import only counts calls before the first day recorded live; the part of that day before the install is left out.
+
+## Integrations
+
+All are detected automatically: without the tool installed, nothing changes.
+
+| Tool | What CATO does with it |
+|---|---|
+| **Serena MCP** | Applies an answer limit (`serenaMaxAnswerChars`, default 20,000 characters) to the read tools when the model doesn't ask for one; denies heavy reads by `relative_path`; checks `.json`/`.py` syntax after Serena's edits; does not sandbox its answers, which are already localized |
+| **Graphify** | `repo_map` adds the relations in `graphify-out/graph.json` to the ranking; the `mcp__cato__graph_query` tool queries the graph without loading it; reading `graph.json` and the cache is denied in favor of `GRAPH_REPORT.md` |
+| **ast-grep** | The `mcp__cato__structural_search` tool (searches the syntax tree, compact `file:L<start>-L<end>` results); `ast-grep ... --json` in Bash becomes one line per match; the ast-grep MCP's `find_code` gets `max_results` (`astGrepMaxResults`, default 60). Found even outside the PATH when installed with `npm i -g @ast-grep/cli` or `cargo install ast-grep` |
+| **GitHub MCP** | Strips API fields from the JSON (`*_url`, `node_id`, avatars, full users become the login, labels become names) and lockfile diffs (`compactGithub`); denies `get_file_contents` on lockfiles; whatever stays large goes to the sandbox with `fields`/`perPage` tips |
+
+The `cato-efficiency` skill and the `cato-explorer` agent tell the model which tool to use first when each one is available.
+
+## Development
 
 ```bash
 claude plugin validate plugin
 claude plugin test plugin
 ```
 
-## Licença
+## License
 
-[MIT com Commons Clause (Não Comercial)](LICENSE) — Livre para usar, modificar e publicar versões próprias sem fins lucrativos; a venda ou comercialização é proibida sem autorização.
+[MIT with Commons Clause (Non-Commercial)](LICENSE) — Free to use, modify, and publish non-commercial forks/versions; commercial sale or monetization is prohibited without permission.

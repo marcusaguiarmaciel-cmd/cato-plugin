@@ -3,6 +3,9 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { maskOldToolResults } from '../hooks/lib/compaction.ts'
 
+// Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
+const PT = { options: { language: 'pt' } }
+
 const norm = (p: unknown) => String(p).replace(/\\/g, '/')
 const BIG_SOURCE = Array.from({ length: 3000 }, (_, i) => (i % 100 === 0 ? `export function f${i}() {` : i % 100 === 99 ? '}' : `  const v${i} = ${i}`)).join('\n')
 
@@ -20,24 +23,24 @@ function project(on: On) {
   on('tool.call', () => ({ result: { file: { content: 'conteúdo' } } }))
 }
 
-test('readGuard: Read inteiro de arquivo grande recebe o esqueleto; a segunda tentativa passa', { options: { readGuard: true } }, async ($, on) => {
+test('readGuard: Read inteiro de arquivo grande recebe o esqueleto; a segunda tentativa passa', { options: { language: 'pt', readGuard: true } }, async ($, on) => {
   project(on)
   const first = await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })
-  expect(String(first.deny)).toContain('[CATO] src/big.ts tem')
+  expect(String(first.deny)).toContain('[CATO] src/big.ts is')
   expect(String(first.deny)).toMatch(/\[L1-L100\] export function f0\(\) \{/)
   const report = async () => String(((await $.command.run(CMD(''))) as { text?: string }).text)
   // Desvio: credita o arquivo menos o esqueleto; pedido de novo: desconta o arquivo (fica só o custo do esqueleto)
-  expect(await report()).toMatch(/leituras grandes trocadas pelo esqueleto\s+1x\s+\d+k tokens/)
+  expect(await report()).toMatch(/Leituras grandes trocadas pelo esqueleto\s+1×\s+[\d,]+ mil/)
   const second = await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })
   expect(second.deny).toBeUndefined()
-  expect(await report()).toMatch(/leituras grandes trocadas pelo esqueleto\s+1x\s+−\d+ tokens\s+\(1 pedidas de novo e descontadas\)/)
+  expect(await report()).toMatch(/Leituras grandes trocadas pelo esqueleto\s+1×\s+-[\d,]+( mil)?\s+\(1 pedidas de novo e descontadas\)/)
   // Com offset/limit, arquivo pequeno ou fora do projeto, nada muda
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/other-big.ts', offset: 1, limit: 50 })).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/small.ts' })).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Read', file_path: 'D:/outro/big.ts' })).deny).toBeUndefined()
 })
 
-test('readGuard desligado (padrão): Read grande passa direto', async ($, on) => {
+test('readGuard desligado (padrão): Read grande passa direto', PT, async ($, on) => {
   project(on)
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny).toBeUndefined()
 })
@@ -47,7 +50,7 @@ const exchange = (i: number, size: number): SessionMessage[] => [
   { role: 'user', text: '', toolUses: [], toolResults: [{ tool_use_id: `t${i}`, text: 'x'.repeat(size), isError: false }], handle: `u${i}` },
 ]
 
-test('maskOldToolResults: só resultados grandes fora das últimas trocas, com o par tool_use/tool_result intacto', () => {
+test('maskOldToolResults: só resultados grandes fora das últimas trocas, com o par tool_use/tool_result intacto', PT, () => {
   const messages = Array.from({ length: 15 }, (_, i) => exchange(i, i % 2 ? 5_000 : 100)).flat()
   const { messages: out, masked } = maskOldToolResults(messages, 10, 2_000)
   // trocas 0..4 ficam fora das 10 últimas; dessas, as ímpares (1 e 3) são grandes
@@ -55,19 +58,19 @@ test('maskOldToolResults: só resultados grandes fora das últimas trocas, com o
   const user1 = out[3]
   expect(user1.handle).toBeUndefined()
   expect(user1.toolResults?.[0]).toMatchObject({ tool_use_id: 't1', isError: false })
-  expect(String(user1.toolResults?.[0].text)).toContain('resultado de Bash omitido pelo CATO antes do resumo: 5000 caracteres')
+  expect(String(user1.toolResults?.[0].text)).toContain('[Bash result omitted by CATO before the summary: 5000 characters]')
   expect(out[1]).toBe(messages[1]) // pequeno: mesma mensagem, com handle
   expect(out[29]).toBe(messages[29]) // recente: intacta
   expect(maskOldToolResults(messages.slice(0, 6), 10, 2_000).masked).toBe(0) // conversa curta: nada
 })
 
-test('maskColdCompact: com cache quente a compactação recebe as mensagens intactas; com cache frio, mascaradas', { options: { maskColdCompact: true } }, async ($, on) => {
+test('maskColdCompact: com cache quente a compactação recebe as mensagens intactas; com cache frio, mascaradas', { options: { language: 'pt', maskColdCompact: true } }, async ($, on) => {
   mock.store(on)
   const clock = mock.clock(on, { now: Date.UTC(2026, 9, 28, 10) })
   on('ui.status', () => ({ value: undefined }))
   const seen: number[] = []
   on('session.compact', (_, e) => {
-    seen.push(e.messages.filter(m => m.toolResults?.some(r => r.text.includes('omitido pelo CATO'))).length)
+    seen.push(e.messages.filter(m => m.toolResults?.some(r => r.text.includes('omitted by CATO'))).length)
     return { messages: [{ role: 'user', text: 'resumo', toolUses: [] }] }
   })
   on('turn.step', async function* (_, e) {
@@ -87,41 +90,41 @@ test('maskColdCompact: com cache quente a compactação recebe as mensagens inta
   expect(seen).toEqual([0, 5])
   // 5 resultados de 5.000 caracteres viraram uma linha cada: ≈ 6k tokens a menos no resumo
   const report = String(((await $.command.run(CMD(''))) as { text?: string }).text)
-  expect(report).toMatch(/resultados antigos mascarados antes do resumo\s+1x\s+6k tokens/)
-  expect(report).toMatch(/total: 6k tokens a menos no contexto ≈ \$0\.05/)
+  expect(report).toMatch(/Resultados antigos mascarados antes do resumo\s+1×\s+[\d,]+ mil/)
+  expect(report).toMatch(/Total: [\d,]+ mil tokens a menos no contexto ≈ US\$ 0,05/)
 })
 
 const CMD = (args: string) => ({ command: 'cato', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
 
-test('/cato experimental: ligar vale na hora e persiste; padrão volta a seguir o /plugin', async ($, on) => {
+test('/cato experimental: ligar vale na hora e persiste; padrão volta a seguir o /plugin', PT, async ($, on) => {
   project(on)
   const run = async (args: string) => String(((await $.command.run(CMD(args))) as { text?: string }).text)
-  expect(await run('experimental')).toContain('(configuração do /plugin): readGuard desligado, maskColdCompact desligado')
+  expect(await run('experimental')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
 
-  expect(await run('experimental ligar')).toContain('(escolhido por /cato experimental): readGuard ligado, maskColdCompact ligado')
-  expect(String((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny)).toContain('[CATO] src/big.ts tem')
+  expect(await run('experimental ligar')).toContain('readGuard ligado · maskColdCompact ligado (escolhido por /cato-experimental)')
+  expect(String((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny)).toContain('[CATO] src/big.ts is')
   expect(await run('doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado')
 
-  expect(await run('experimental padrão')).toContain('(configuração do /plugin): readGuard desligado')
+  expect(await run('experimental padrão')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/other-big.ts' })).deny).toBeUndefined()
 })
 
-test('/cato-experimental e /cato-doctor: comandos próprios fazem o mesmo que os subcomandos', async ($, on) => {
+test('/cato-experimental e /cato-doctor: comandos próprios fazem o mesmo que os subcomandos', PT, async ($, on) => {
   project(on)
   const run = async (command: string, args = '') => String(((await $.command.run({ ...CMD(args), command })) as { text?: string }).text)
-  expect(await run('cato-experimental', 'Ligar')).toContain('(escolhido por /cato experimental): readGuard ligado')
+  expect(await run('cato-experimental', 'Ligar')).toContain('readGuard ligado · maskColdCompact ligado (escolhido por /cato-experimental)')
   expect(await run('cato-doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado')
-  expect(await run('cato-experimental', 'padrão')).toContain('(configuração do /plugin): readGuard desligado')
+  expect(await run('cato-experimental', 'padrão')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
 })
 
-test('/cato experimental desligar vale por cima do /plugin', { options: { readGuard: true, maskColdCompact: true } }, async ($, on) => {
+test('/cato experimental desligar vale por cima do /plugin', { options: { language: 'pt', readGuard: true, maskColdCompact: true } }, async ($, on) => {
   project(on)
   const text = String(((await $.command.run(CMD('experimental desligar'))) as { text?: string }).text)
-  expect(text).toContain('readGuard desligado, maskColdCompact desligado')
+  expect(text).toContain('readGuard desligado · maskColdCompact desligado')
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny).toBeUndefined()
 })
 
-test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do período', async ($, on) => {
+test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do período', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on, { now: Date.UTC(2026, 9, 28, 15) })
   const daily = [
@@ -135,11 +138,11 @@ test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do p
       : { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } },
   )
   const text = String(((await $.command.run(CMD('7'))) as { text?: string }).text)
-  expect(text).toMatch(/comandos reescritos pelo RTK\s+15x\s+500k tokens\s+\(medido pelo rtk gain\)/)
-  expect(text).toMatch(/total: 500k tokens a menos no contexto ≈ \$\d+\.\d+/)
+  expect(text).toMatch(/Comandos reescritos pelo RTK\s+15×\s+500 mil/)
+  expect(text).toMatch(/Total: 500 mil tokens a menos no contexto ≈ US\$ \d+,\d+/)
 })
 
-test('ast-grep fora do PATH: o binário do npm global em %APPDATA% é encontrado', async ($, on) => {
+test('ast-grep fora do PATH: o binário do npm global em %APPDATA% é encontrado', PT, async ($, on) => {
   const bin = 'C:/Users/t/AppData/Roaming/npm/node_modules/@ast-grep/cli/ast-grep.exe'
   mock.store(on)
   mock.clock(on)
@@ -157,11 +160,11 @@ test('ast-grep fora do PATH: o binário do npm global em %APPDATA% é encontrado
   expect(text).toContain('ast-grep instalado')
 })
 
-test('/cato: período só muda com número escrito', async ($, on) => {
+test('/cato: período só muda com número escrito', PT, async ($, on) => {
   project(on)
   const run = async (args: string) => String(((await $.command.run(CMD(args))) as { text?: string }).text)
-  expect(await run('')).toContain('Cache misses da conversa principal (30 dias')
-  expect(await run('  ')).toContain('(30 dias')
-  expect(await run('7')).toContain('(7 dias')
-  expect(await run('500')).toContain('(90 dias')
+  expect(await run('')).toContain('CATO · Custo real — últimos 30 dias')
+  expect(await run('  ')).toContain('últimos 30 dias')
+  expect(await run('7')).toContain('últimos 7 dias')
+  expect(await run('500')).toContain('últimos 90 dias')
 })

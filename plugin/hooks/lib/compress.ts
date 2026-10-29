@@ -82,7 +82,7 @@ export function dedupeExactRepeats(lines: string[]): { lines: string[]; collapse
   let repeat = 0
   let collapsed = 0
   const flush = () => {
-    if (repeat > 0) out.push(`  ... [linha acima repetida, idêntica, mais ${repeat}x] ...`)
+    if (repeat > 0) out.push(`  ... [line above repeated identically ${repeat} more times] ...`)
     repeat = 0
   }
   for (const line of lines) {
@@ -124,8 +124,8 @@ export function compressGeneric(text: string, maxLines = 120): Compressed {
   })
   const errorLines = [...errors].map(([line, at]) => `L${at.line}: ${line}${at.count > 1 ? `  [${at.count}x]` : ''}`)
   const kept = [...errors.values()].reduce((sum, at) => sum + at.count, 0)
-  const out = [...head, `\n... [CATO: ${middle.length - kept} linhas intermediárias omitidas (de ${raw.length} totais)] ...`]
-  if (errorLines.length) out.push('--- [CATO: linhas de erro/alerta do trecho omitido] ---', ...errorLines, '---')
+  const out = [...head, `\n... [CATO: ${middle.length - kept} middle lines omitted (of ${raw.length} total)] ...`]
+  if (errorLines.length) out.push('--- [CATO: error/warning lines from the omitted part] ---', ...errorLines, '---')
   return { text: [...out, ...tail].join('\n'), changed: true, omittedErrors }
 }
 
@@ -145,7 +145,7 @@ function trimTestOutput(kept: string[], failureStart: number): Compressed {
   const looseErrors = beforeRest.filter(isErrorLine)
   out.push(...beforeKept)
   if (beforeRest.length) {
-    out.push(`... [CATO: ${beforeRest.length - Math.min(looseErrors.length, 60)} linhas antes das falhas omitidas] ...`)
+    out.push(`... [CATO: ${beforeRest.length - Math.min(looseErrors.length, 60)} lines before the failures omitted] ...`)
     out.push(...looseErrors.slice(0, 60))
     omittedErrors += Math.max(0, looseErrors.length - 60)
   }
@@ -157,7 +157,7 @@ function trimTestOutput(kept: string[], failureStart: number): Compressed {
     const tail = failures.slice(-60) // sumário final do runner
     const middle = failures.slice(MAX_FAILURE_LINES - 60, -60)
     omittedErrors += middle.filter(line => isErrorLine(line) || FAILURE_START_RE.test(line.trim())).length
-    out.push(...head, `... [CATO: ${middle.length} linhas do trecho de falhas omitidas] ...`, ...tail)
+    out.push(...head, `... [CATO: ${middle.length} lines from the failures section omitted] ...`, ...tail)
   }
   return { text: out.join('\n'), changed: true, omittedErrors }
 }
@@ -191,7 +191,7 @@ export function compressTests(text: string): Compressed {
   }
   // Quase nada para suprimir e saída curta: fica como está. Longa, o corte por seção ainda vale.
   if (omitted < 5 && kept.length <= 200) return { text, changed: false, omittedErrors: 0 }
-  const header = `[CATO Test Filter: ${passed} linhas de teste aprovado e ${omitted - passed} linhas de progresso/banner suprimidas]`
+  const header = `[CATO Test Filter: ${passed} passing-test lines and ${omitted - passed} progress/banner lines suppressed]`
   if (kept.length <= 200) return { text: `${header}\n${kept.join('\n')}`, changed: true, omittedErrors: 0 }
   const trimmed = trimTestOutput(kept, failureStart)
   return { ...trimmed, text: `${header}\n${trimmed.text}` }
@@ -246,8 +246,8 @@ export function compressLinter(text: string): Compressed {
   const files = [...perFile].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([f, n]) => `${f}: ${n}`).join(', ')
   return {
     text:
-      `${kept.join('\n')}\n[CATO Linter Filter: ${suppressed} linhas adicionais suprimidas` +
-      `${dist ? ` | Por código: ${dist}` : ''}${files ? ` | Por arquivo: ${files}` : ''}]`,
+      `${kept.join('\n')}\n[CATO Linter Filter: ${suppressed} more lines suppressed` +
+      `${dist ? ` | By code: ${dist}` : ''}${files ? ` | By file: ${files}` : ''}]`,
     changed: true,
     omittedErrors,
   }
@@ -271,7 +271,7 @@ export function compressGitDiff(command: string, text: string): Compressed {
     kept.push(line)
   }
   if (!omitted) return { text, changed: false, omittedErrors: 0 }
-  kept.push(`\n[CATO Git Diff Filter: ${omitted} linhas de lockfiles/bundles omitidas]`)
+  kept.push(`\n[CATO Git Diff Filter: ${omitted} lockfile/bundle lines omitted]`)
   return { text: kept.join('\n'), changed: true, omittedErrors: 0 }
 }
 

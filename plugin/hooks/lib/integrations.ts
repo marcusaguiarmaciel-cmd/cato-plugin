@@ -88,7 +88,7 @@ function parseAstGrepJson(raw: string): AstGrepMatch[] | null {
 export function formatAstGrepMatches(raw: string, maxResults: number, budgetTokens = 6000): string | null {
   const matches = parseAstGrepJson(raw)
   if (!matches) return null
-  if (!matches.length) return 'Nenhum casamento.'
+  if (!matches.length) return 'No matches.'
   const out: string[] = []
   let used = 0
   let shown = 0
@@ -97,7 +97,7 @@ export function formatAstGrepMatches(raw: string, maxResults: number, budgetToke
     const start = (m.range?.start?.line ?? 0) + 1
     const end = (m.range?.end?.line ?? start - 1) + 1
     const code = String(m.text ?? '').split('\n')
-    const snippet = code.slice(0, 4).map(l => l.slice(0, 200)).join('\n    ') + (code.length > 4 ? `\n    ... (+${code.length - 4} linhas)` : '')
+    const snippet = code.slice(0, 4).map(l => l.slice(0, 200)).join('\n    ') + (code.length > 4 ? `\n    ... (+${code.length - 4} lines)` : '')
     const vars = Object.entries(m.metaVariables?.single ?? {})
       .map(([k, v]) => `$${k}=${String(v?.text ?? '').slice(0, 60)}`)
       .join(' ')
@@ -109,8 +109,8 @@ export function formatAstGrepMatches(raw: string, maxResults: number, budgetToke
     shown += 1
   }
   const files = new Set(matches.map(m => m.file)).size
-  const header = `${matches.length} casamento(s) em ${files} arquivo(s)` + (shown < matches.length ? `; mostrando ${shown}` : '')
-  const footer = shown < matches.length ? `\n... [+${matches.length - shown} casamentos: refine o padrão ou passe path]` : ''
+  const header = `${matches.length} match(es) in ${files} file(s)` + (shown < matches.length ? `; showing ${shown}` : '')
+  const footer = shown < matches.length ? `\n... [+${matches.length - shown} matches: refine the pattern or pass path]` : ''
   return `${header}\n${out.join('\n')}${footer}`
 }
 
@@ -234,16 +234,16 @@ export function graphFileEdges(graph: Graph): Map<string, Map<string, number>> {
 /** Nós que casam com o termo (por grau) e seus vizinhos, dentro do orçamento. */
 export function queryGraph(graph: Graph, term: string, limit = 12, budgetTokens = 3000): string {
   const words = term.toLowerCase().split(/\s+/).filter(Boolean)
-  if (!words.length) return 'Informe um termo.'
+  if (!words.length) return 'Provide a term.'
   const matched = [...graph.nodes.values()]
     .filter(n => words.every(w => `${n.label} ${n.id} ${n.file}`.toLowerCase().includes(w)))
     .sort((a, b) => (graph.degree.get(b.id) ?? 0) - (graph.degree.get(a.id) ?? 0))
-  if (!matched.length) return `Nenhum nó do grafo casa com '${term}'.`
+  if (!matched.length) return `No graph node matches '${term}'.`
   const where = (n: GraphNode) => (n.file ? ` [${n.file}${n.location ? `:${n.location}` : ''}]` : '')
   const out: string[] = []
   let used = 0
   for (const node of matched.slice(0, limit)) {
-    const lines = [`${node.label}${where(node)}${node.community ? ` (comunidade ${node.community})` : ''} — grau ${graph.degree.get(node.id) ?? 0}`]
+    const lines = [`${node.label}${where(node)}${node.community ? ` (community ${node.community})` : ''} — degree ${graph.degree.get(node.id) ?? 0}`]
     for (const l of graph.links) {
       if (lines.length > 15) {
         lines.push('  ...')
@@ -261,6 +261,6 @@ export function queryGraph(graph: Graph, term: string, limit = 12, budgetTokens 
     out.push(block)
     used += cost
   }
-  const extra = matched.length > out.length ? `\n... [+${matched.length - out.length} nós casam; refine o termo]` : ''
-  return `# [CATO Graph: ${matched.length} nó(s) para '${term}' no grafo do Graphify]\n${out.join('\n\n')}${extra}`
+  const extra = matched.length > out.length ? `\n... [+${matched.length - out.length} more nodes match; refine the term]` : ''
+  return `# [CATO Graph: ${matched.length} node(s) for '${term}' in the Graphify graph]\n${out.join('\n\n')}${extra}`
 }

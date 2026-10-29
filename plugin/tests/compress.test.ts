@@ -39,7 +39,7 @@ test('tsc com 500 erros em 40 arquivos: todo arquivo aparece ao menos uma vez', 
   expect(r.changed).toBe(true)
   for (let f = 0; f < 40; f++) expect(r.text).toContain(`src/mod${f}.ts(`)
   expect(r.omittedErrors).toBeGreaterThan(0)
-  expect(r.text).toContain('Por arquivo:')
+  expect(r.text).toContain('By file:')
 })
 
 test('log de build: linhas de erro distintas do meio ficam, repetidas viram contagem', () => {

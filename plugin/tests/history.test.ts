@@ -3,6 +3,9 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { aggregate, AWK_EXTRACT, parseExtract, parseJsonlText } from '../hooks/lib/history.ts'
 
+// Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
+const PT = { options: { language: 'pt' } }
+
 const CMD = (args: string) => ({ command: 'cato', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
 
 const line = (o: Record<string, unknown>) => JSON.stringify(o)
@@ -17,7 +20,7 @@ const usage = (input: number, cw: number, cr: number, out: number, oneHour = tru
 })
 const tsv = (id: string, ts: string, cw: number, cr: number, out: number) => `A\t${id}\tclaude-opus-5-5\t${ts}\t0\t10\t${cw}\t${cr}\t${out}\t${cw}\t0`
 
-test('parseJsonlText: a mesma chamada em várias linhas conta uma vez (a de maior output); compactação e sidechain', () => {
+test('parseJsonlText: a mesma chamada em várias linhas conta uma vez (a de maior output); compactação e sidechain', PT, () => {
   const text = [
     assistant('msg_1', '2026-10-20T10:00:00Z', usage(10, 5_000, 0, 1)),
     assistant('msg_1', '2026-10-20T10:00:01Z', usage(10, 5_000, 0, 300)),
@@ -33,13 +36,13 @@ test('parseJsonlText: a mesma chamada em várias linhas conta uma vez (a de maio
   expect(events.filter(e => e.kind === 'compact')).toHaveLength(1)
 })
 
-test('parseExtract lê o formato dos extratores e ignora linhas fora dele', () => {
+test('parseExtract lê o formato dos extratores e ignora linhas fora dele', PT, () => {
   const events = parseExtract([tsv('msg_9', '2026-10-20T10:00:00Z', 1, 2, 3), 'C\t2026-10-20T11:00:00Z', 'lixo', 'A\tsem-msg'].join('\r\n'))
   expect(events).toHaveLength(2)
   expect(AWK_EXTRACT).toContain('compact_boundary')
 })
 
-test('aggregate: reconstrução após compactar, pausa longa, faixa de contexto, liveSince e ids repetidos', () => {
+test('aggregate: reconstrução após compactar, pausa longa, faixa de contexto, liveSince e ids repetidos', PT, () => {
   const t = (h: number) => Date.UTC(2026, 9, 20, h)
   const events = parseJsonlText([
     assistant('msg_a', new Date(t(10)).toISOString(), usage(10, 200_000, 0, 100)), // primeira: não é miss
@@ -106,7 +109,7 @@ function claudeHome(on: On, written: string[], store: Record<string, unknown> = 
   })
 }
 
-test('/cato importar: arquivos grandes pelo extrator, subagentes à parte, e rodar de novo não duplica', async ($, on) => {
+test('/cato importar: arquivos grandes pelo extrator, subagentes à parte, e rodar de novo não duplica', PT, async ($, on) => {
   const written: string[] = []
   claudeHome(on, written)
   const first = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
@@ -114,7 +117,7 @@ test('/cato importar: arquivos grandes pelo extrator, subagentes à parte, e rod
   expect(first).toContain('Extrator: awk')
   const report = String(((await $.command.run(CMD('30'))) as { text?: string }).text)
   expect(report).toContain('Inclui 3 chamadas importadas')
-  expect(report).toMatch(/subagentes \(30 dias\): \$\d+\.\d+ em 1 chamadas/)
+  expect(report).toMatch(/Subagentes: US\$ \d+,\d+ em 1 chamadas/)
   const again = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
   expect(again).toContain('0 arquivos lidos agora, 0 chamadas novas')
   expect(written).toHaveLength(0)
@@ -126,14 +129,14 @@ const emptyHistory = (extra: Record<string, unknown>) => ({
   history: { liveSince: Date.UTC(2026, 9, 28), days: {}, files: {}, seen: [], calls: 0, first: 0, last: 0, ...extra },
 })
 
-test('/cato importar: arquivo em que a execução anterior parou com o mesmo extrator fica de fora até mudar', async ($, on) => {
+test('/cato importar: arquivo em que a execução anterior parou com o mesmo extrator fica de fora até mudar', PT, async ($, on) => {
   claudeHome(on, [], emptyHistory({ pending: { path: BIG, size: 200 * 1024 * 1024, mtimeMs: 1, extractor: 'awk' } }))
   const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
   expect(text).toContain('1 arquivos lidos agora, 1 chamadas novas')
-  expect(text).toContain('interrompido no meio da leitura')
+  expect(text).toContain('interrupted while reading')
 })
 
-test('/cato importar: sem awk no PATH usa o do Git, e o que falhou com o PowerShell é lido de novo', async ($, on) => {
+test('/cato importar: sem awk no PATH usa o do Git, e o que falhou com o PowerShell é lido de novo', PT, async ($, on) => {
   const failed = { size: 200 * 1024 * 1024, mtimeMs: 1, status: 'failed', calls: 0, note: 'extrator falhou: cato: $.process.run(powershell) aborted' }
   claudeHome(on, [], emptyHistory({ files: { [BIG]: failed } }), GIT_AWK)
   const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
@@ -142,7 +145,7 @@ test('/cato importar: sem awk no PATH usa o do Git, e o que falhou com o PowerSh
   expect(text).not.toContain('ficaram de fora')
 })
 
-test('/cato importar: leitura interrompida não marca o arquivo como falha', async ($, on) => {
+test('/cato importar: leitura interrompida não marca o arquivo como falha', PT, async ($, on) => {
   claudeHome(on, [], {}, 'awk', true)
   const text = String(((await $.command.run(CMD('importar'))) as { text?: string }).text)
   expect(text).toContain('A leitura foi interrompida; faltam 2 arquivos')
@@ -150,7 +153,7 @@ test('/cato importar: leitura interrompida não marca o arquivo como falha', asy
   expect(String(((await $.command.run(CMD('importar'))) as { text?: string }).text)).toContain('faltam 2 arquivos')
 })
 
-test('/cato doctor: aponta resto da versão Python e opusplan, e não escreve nada', async ($, on) => {
+test('/cato doctor: aponta resto da versão Python e opusplan, e não escreve nada', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   mock.env(on, { USERPROFILE: 'C:\\Users\\t' })
@@ -171,7 +174,7 @@ test('/cato doctor: aponta resto da versão Python e opusplan, e não escreve na
   const text = String(((await $.command.run(CMD('doctor'))) as { text?: string }).text)
   expect(text).toContain('nada foi alterado')
   expect(text).toContain('❌ A versão Python do CATO ainda está configurada')
-  expect(text).toContain('⚠ model=opusplan')
-  expect(text).toContain('⚠ CLAUDE.md: 250 linhas')
+  expect(text).toContain('⚠️ model=opusplan')
+  expect(text).toContain('⚠️ CLAUDE.md: 250 linhas')
   expect(writes).toHaveLength(0)
 })

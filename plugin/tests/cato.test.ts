@@ -1,10 +1,13 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+// Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
+const PT = { options: { language: 'pt' } }
+
 const CATO_CMD = { command: 'cato', args: '', origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } }
 
 const NOISY_INSTALL = Array.from({ length: 300 }, (_, i) => `added package-${i}@1.0.${i} from registry`).join('\n')
 
-test('leitura de lockfile ou node_modules é negada antes de encher o contexto', async ($, on) => {
+test('leitura de lockfile ou node_modules é negada antes de encher o contexto', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   on('tool.call', () => ({ result: { file: { content: 'ok' } } }))
@@ -19,7 +22,7 @@ test('leitura de lockfile ou node_modules é negada antes de encher o contexto',
   expect(source.deny).toBeUndefined()
 })
 
-test('saída ruidosa de instalação é comprimida e o log bruto é guardado', async ($, on) => {
+test('saída ruidosa de instalação é comprimida e o log bruto é guardado', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   mock.env(on, { USERPROFILE: 'C:\\Users\\teste' })
@@ -32,13 +35,13 @@ test('saída ruidosa de instalação é comprimida e o log bruto é guardado', a
 
   const ran = await $.tool.call({ tool: 'Bash', command: 'npm install' })
   const stdout = (ran.result as { stdout: string }).stdout
-  expect(stdout).toContain('linhas intermediárias omitidas')
+  expect(stdout).toContain('middle lines omitted')
   expect(stdout).toContain('[CATO #cmd_')
   expect(stdout.length).toBeLessThan(NOISY_INSTALL.length / 2)
   expect(written[0]).toMatch(/^C:[\\/]Users[\\/]teste[\\/]\.cato[\\/]logs[\\/]cmd_[0-9a-f]{8}\.log$/)
 })
 
-test('saída de leitura de código (cat, sed, grep) nunca é alterada', async ($, on) => {
+test('saída de leitura de código (cat, sed, grep) nunca é alterada', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   on('tool.call', () => ({ result: { stdout: NOISY_INSTALL, stderr: '', interrupted: false } }))
@@ -47,7 +50,7 @@ test('saída de leitura de código (cat, sed, grep) nunca é alterada', async ($
   expect((ran.result as { stdout: string }).stdout).toBe(NOISY_INSTALL)
 })
 
-test('/cato mostra o relatório mesmo sem chamadas registradas', async ($, on) => {
+test('/cato mostra o relatório mesmo sem chamadas registradas', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   const out = await $.command.run(CATO_CMD)

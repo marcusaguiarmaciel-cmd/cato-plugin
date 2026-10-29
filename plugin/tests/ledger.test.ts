@@ -4,6 +4,9 @@ import type { Engine } from 'claude-code/testing'
 
 import { priceFor, sameModel, usageCost } from '../hooks/lib/pricing.ts'
 
+// Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
+const PT = { options: { language: 'pt' } }
+
 type Usage = {
   model: string
   input_tokens: number
@@ -54,7 +57,7 @@ async function report($: Engine): Promise<string> {
   return String(((await $.command.run(CATO_CMD)) as { text?: string }).text)
 }
 
-test('precompute não conta como compactação; a reescrita após /compact é reconstrução esperada, não miss', async ($, on) => {
+test('precompute não conta como compactação; a reescrita após /compact é reconstrução esperada, não miss', PT, async ($, on) => {
   const { clock, state } = world(on)
 
   state.usage = usage('claude-opus-5-5', 200_000, 5_000)
@@ -66,8 +69,8 @@ test('precompute não conta como compactação; a reescrita após /compact é re
   state.usage = usage('claude-opus-5-5', 0, 200_000)
   await step($)
   let text = await report($)
-  expect(text).toMatch(/outras \(prefixo mudou\)\s+1x/)
-  expect(text).toMatch(/Reconstruções esperadas após compactar \(não são misses\): 0x/)
+  expect(text).toMatch(/Outras \(prefixo mudou\)\s+1×/)
+  expect(text).toContain('Reconstruções esperadas após compactar (não são misses): 0×')
 
   // compactação de verdade: a próxima escrita grande é esperada
   await clock.advance(60_000)
@@ -75,11 +78,11 @@ test('precompute não conta como compactação; a reescrita após /compact é re
   state.usage = usage('claude-opus-5-5', 0, 150_000)
   await step($)
   text = await report($)
-  expect(text).toMatch(/outras \(prefixo mudou\)\s+1x/)
-  expect(text).toMatch(/Reconstruções esperadas após compactar \(não são misses\): 1x/)
+  expect(text).toMatch(/Outras \(prefixo mudou\)\s+1×/)
+  expect(text).toContain('Reconstruções esperadas após compactar (não são misses): 1×')
 })
 
-test('subagente: custo à parte com TTL de 5 min e sem mexer no estado de cache da conversa principal', async ($, on) => {
+test('subagente: custo à parte com TTL de 5 min e sem mexer no estado de cache da conversa principal', PT, async ($, on) => {
   const { clock, state } = world(on)
 
   state.usage = usage('claude-opus-5-5', 200_000, 5_000)
@@ -98,22 +101,22 @@ test('subagente: custo à parte com TTL de 5 min e sem mexer no estado de cache 
   await step($)
 
   const text = await report($)
-  expect(text).toMatch(/troca de modelo\s+0x/)
-  expect(text).toMatch(/outras \(prefixo mudou\)\s+1x/)
-  expect(text).toMatch(/subagentes \(30 dias\): \$5\.01 em 2 chamadas/)
-  expect(text).toMatch(/hoje\s+\$\d+\.\d+\s+2 chamadas/)
+  expect(text).toMatch(/Troca de modelo\s+0×/)
+  expect(text).toMatch(/Outras \(prefixo mudou\)\s+1×/)
+  expect(text).toContain('Subagentes: US$ 5,01 em 2 chamadas')
+  expect(text).toMatch(/hoje\s+US\$ \d+,\d+\s+2\s/)
 })
 
-test('modelo sem preço conhecido não ganha preço de Opus: fica fora do custo e é contado', async ($, on) => {
+test('modelo sem preço conhecido não ganha preço de Opus: fica fora do custo e é contado', PT, async ($, on) => {
   const { state } = world(on)
   state.usage = usage('modelo-desconhecido-1', 1_000, 1_000)
   await step($)
   const text = await report($)
   expect(text).toContain('1 chamadas de modelo sem preço conhecido')
-  expect(text).toMatch(/hoje\s+\$0\.00/)
+  expect(text).toMatch(/hoje\s+US\$ 0,00/)
 })
 
-test('preços: id completo, alias, sufixo [1m] e modelo desconhecido', () => {
+test('preços: id completo, alias, sufixo [1m] e modelo desconhecido', PT, () => {
   expect(priceFor('claude-opus-5-5')?.output).toBe(20)
   expect(priceFor('claude-opus-5-5[1m]')?.output).toBe(20)
   expect(priceFor('opus')?.output).toBe(20)
@@ -122,7 +125,7 @@ test('preços: id completo, alias, sufixo [1m] e modelo desconhecido', () => {
   expect(usageCost('gpt-5', { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 1, cache_creation_input_tokens: 1 }, 60)).toBeNull()
 })
 
-test('sameModel: alias casa com a família; opusplan e vazio são "não sei"', () => {
+test('sameModel: alias casa com a família; opusplan e vazio são "não sei"', PT, () => {
   expect(sameModel('opus', 'claude-opus-5-5')).toBe(true)
   expect(sameModel('claude-opus-5-5[1m]', 'claude-opus-5-5')).toBe(true)
   expect(sameModel('sonnet', 'claude-opus-5-5')).toBe(false)
@@ -131,7 +134,7 @@ test('sameModel: alias casa com a família; opusplan e vazio são "não sei"', (
   expect(sameModel('', 'claude-opus-5-5')).toBeNull()
 })
 
-test('compactação: instruções do CATO entram só quando ninguém deu as suas, inclusive no precompute', async ($, on) => {
+test('compactação: instruções do CATO entram só quando ninguém deu as suas, inclusive no precompute', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
   on('ui.status', () => ({ value: undefined }))
@@ -144,13 +147,13 @@ test('compactação: instruções do CATO entram só quando ninguém deu as suas
   await $.session.compact({ trigger: 'manual', messages: [MSG], instructions: 'foque no bug de login' })
   await $.session.compact({ trigger: 'precompute', messages: [MSG] })
   await $.session.compact({ trigger: 'auto', messages: [MSG], agentId: 'agent-1' })
-  expect(String(seen[0])).toContain('decisões tomadas')
+  expect(String(seen[0])).toContain('the decisions made')
   expect(seen[1]).toBe('foque no bug de login')
-  expect(String(seen[2])).toContain('decisões tomadas')
+  expect(String(seen[2])).toContain('the decisions made')
   expect(seen[3]).toBeUndefined()
 })
 
-test('troca de modelo com cache quente: um aviso com o custo, sem segurar o prompt', async ($, on) => {
+test('troca de modelo com cache quente: um aviso com o custo, sem segurar o prompt', PT, async ($, on) => {
   const { clock, state, toasts } = world(on)
   let current = 'claude-opus-5-5'
   on('session.model', () => ({ value: current }))
@@ -165,13 +168,13 @@ test('troca de modelo com cache quente: um aviso com o custo, sem segurar o prom
   // mesmo modelo (alias): nada
   current = 'opus'
   expect((await submit()).drop).toBeUndefined()
-  expect(toasts.filter(t => t.includes('trocar de'))).toHaveLength(0)
+  expect(toasts.filter(t => t.includes('Trocar de'))).toHaveLength(0)
 
   // outro modelo: um aviso com custo, prompt segue; repetir não avisa de novo
   current = 'claude-sonnet-5-5'
   expect((await submit()).drop).toBeUndefined()
   expect((await submit()).drop).toBeUndefined()
-  const warned = toasts.filter(t => t.includes('trocar de'))
+  const warned = toasts.filter(t => t.includes('Trocar de'))
   expect(warned).toHaveLength(1)
-  expect(warned[0]).toContain('para claude-sonnet-5-5 relê 200k tokens sem cache ≈ $0.80')
+  expect(warned[0]).toContain('Trocar de claude-opus-5-5 para claude-sonnet-5-5 relê 200 mil tokens sem cache (≈ US$ 0,80)')
 })

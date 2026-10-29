@@ -39,7 +39,7 @@ export function maskOldToolResults(
       return {
         tool_use_id: r.tool_use_id,
         isError: r.isError,
-        text: `[resultado de ${toolNames.get(r.tool_use_id) ?? 'ferramenta'} omitido pelo CATO antes do resumo: ${length} caracteres]`,
+        text: `[${toolNames.get(r.tool_use_id) ?? 'tool'} result omitted by CATO before the summary: ${length} characters]`,
       }
     })
     // Sem o handle, o engine lê a mensagem como construída aqui (com os resultados mascarados)

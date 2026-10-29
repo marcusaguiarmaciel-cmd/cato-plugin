@@ -123,12 +123,12 @@ test('structural_search roda o ast-grep e devolve casamentos compactos; caminho 
   })
 
   const ran = await $.tool.call({ tool: 'mcp__cato__structural_search', pattern: 'console.log($A)', lang: 'ts' })
-  expect(String(ran.result)).toContain('2 casamento(s) em 2 arquivo(s)')
+  expect(String(ran.result)).toContain('2 match(es) in 2 file(s)')
   expect(String(ran.result)).toContain('src/b.ts:L10-L10  [$A=err]')
   expect(calls.at(-1)).toEqual(['ast-grep', 'run', '--pattern', 'console.log($A)', '--json=stream', '--lang', 'ts', '.'])
 
   const outside = await $.tool.call({ tool: 'mcp__cato__structural_search', pattern: 'x', path: '../outro' })
-  expect(String(outside.deny)).toContain('fora do projeto')
+  expect(String(outside.deny)).toContain('outside the project')
 })
 
 test('graph_query responde a partir do grafo do Graphify', async ($, on) => {

@@ -149,7 +149,7 @@ export function buildRepoMap(
   extraEdges?: Map<string, Map<string, number>>,
 ): string {
   const names = [...files.keys()]
-  if (!names.length) return '# [CATO RepoMap] Nenhum arquivo de código encontrado.'
+  if (!names.length) return '# [CATO RepoMap] No code files found.'
   const defs = new Map<string, Set<string>>()
   const words = new Map<string, Set<string>>()
   const definers = new Map<string, string[]>()
@@ -197,7 +197,7 @@ export function buildRepoMap(
     sections.push(section)
     used += cost
   }
-  return [`# [CATO RepoMap] ${sections.length} de ${names.length} arquivos (≈${used} tokens), mais centrais primeiro`, ...sections].join('\n\n')
+  return [`# [CATO RepoMap] ${sections.length} of ${names.length} files (≈${used} tokens), most central first`, ...sections].join('\n\n')
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ export function chunkLines(text: string, size = 20): SandboxChunk[] {
   const lines = text.split('\n')
   const chunks: SandboxChunk[] = []
   for (let i = 0; i < lines.length; i += size) {
-    chunks.push({ title: `Linhas ${i + 1}-${Math.min(lines.length, i + size)}`, content: lines.slice(i, i + size).join('\n') })
+    chunks.push({ title: `Lines ${i + 1}-${Math.min(lines.length, i + size)}`, content: lines.slice(i, i + size).join('\n') })
   }
   return chunks
 }
