@@ -1,5 +1,7 @@
 # CATO: Claude Adaptive Token Optimizer
 
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
+
 [Português](README.pt-BR.md)
 
 A Claude Code plugin that cuts token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation. It runs entirely inside Claude Code, with no Python and no external process per hook, and integrates with Serena, Graphify, ast-grep and GitHub MCP.
