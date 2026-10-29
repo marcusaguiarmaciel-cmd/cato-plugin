@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { compressGeneric, compressLinter, optimizeOutput } from '../hooks/lib/compress.ts'
+import { compressGeneric, compressLinter, isCompressibleCommand, optimizeOutput } from '../hooks/lib/compress.ts'
 
 /** pytest com muitos aprovados e 60 falhas, cada uma com várias linhas de detalhe. */
 function pytestOutput(passed: number, failures: number): string {
@@ -74,4 +74,13 @@ test('saída fora das categorias ruidosas volta igual', () => {
   const r = optimizeOutput('python script.py', raw)
   expect(r.changed).toBe(false)
   expect(r.text).toBe(raw)
+})
+
+test('isCompressibleCommand: prefixos encadeados (echo/export/pushd) contam; pipes de filtro não são recomprimidos', () => {
+  expect(isCompressibleCommand('echo "rodando" && pytest -q')).toBe(true)
+  expect(isCompressibleCommand('export CI=1 && npm test')).toBe(true)
+  expect(isCompressibleCommand('pushd app && cargo test')).toBe(true)
+  expect(isCompressibleCommand('git diff | head -n 20')).toBe(false)
+  expect(isCompressibleCommand('npm test | grep FAIL')).toBe(false)
+  expect(isCompressibleCommand('pytest | rg error')).toBe(false)
 })

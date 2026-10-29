@@ -32,14 +32,17 @@ export function maskOldToolResults(
     const results = message.toolResults
     if (i >= cut || message.role !== 'user' || !results?.some(r => (r.text ?? '').length > minChars)) return message
     const toolResults = results.map(r => {
-      const length = (r.text ?? '').length
+      const text = r.text ?? ''
+      const length = text.length
       if (length <= minChars) return r
       masked += 1
+      const ids = [...new Set(text.match(/#(?:cmd|sbx)_[0-9a-f]{8}\b/g) ?? [])]
+      const ref = ids.length ? ` (${ids.join(', ')})` : ''
       // Mesmo tool_use_id e isError: o par tool_use/tool_result continua casado
       return {
         tool_use_id: r.tool_use_id,
         isError: r.isError,
-        text: `[${toolNames.get(r.tool_use_id) ?? 'tool'} result omitted by CATO before the summary: ${length} characters]`,
+        text: `[${toolNames.get(r.tool_use_id) ?? 'tool'} result omitted by CATO before the summary: ${length} characters${ref}]`,
       }
     })
     // Sem o handle, o engine lê a mensagem como construída aqui (com os resultados mascarados)

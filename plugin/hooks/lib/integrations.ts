@@ -151,7 +151,7 @@ function stripGithub(value: unknown, depth = 0): unknown {
   return out
 }
 
-/** Compacta uma resposta do GitHub MCP: JSON sem campos de API e diffs sem lockfiles. Texto livre volta igual. */
+/** Compacta uma resposta do GitHub MCP: JSON sem campos de API (1 item por linha em arrays) e diffs sem lockfiles. */
 export function compactGithubText(text: string): { text: string; changed: boolean } {
   const trimmed = text.trim()
   if (trimmed.startsWith('diff --git') || /^(From [0-9a-f]{40}|---\s.*\n\+\+\+\s)/m.test(trimmed.slice(0, 400))) {
@@ -159,7 +159,11 @@ export function compactGithubText(text: string): { text: string; changed: boolea
   }
   if (!/^[[{]/.test(trimmed)) return { text, changed: false }
   try {
-    const compact = JSON.stringify(stripGithub(JSON.parse(trimmed)))
+    const stripped = stripGithub(JSON.parse(trimmed))
+    const compact =
+      Array.isArray(stripped) && stripped.length > 1
+        ? `[\n${stripped.map(item => JSON.stringify(item)).join(',\n')}\n]`
+        : JSON.stringify(stripped)
     return compact.length < trimmed.length * 0.9 ? { text: compact, changed: true } : { text, changed: false }
   } catch {
     return { text, changed: false }

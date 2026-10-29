@@ -642,26 +642,39 @@ async function readableProjectFile($: EngineInterface, path: string): Promise<st
   return absolute
 }
 
+const LOW_PRIORITY_PATH_RE = /(?:^|\/)(?:test|tests|__tests__|spec|specs|e2e|fixtures|examples|migrations|benchmarks)(?:\/|$)|\.(?:test|spec)\.[^/]+$/i
+
+function compareCodePaths(a: string, b: string): number {
+  const lowA = LOW_PRIORITY_PATH_RE.test(a) ? 1 : 0
+  const lowB = LOW_PRIORITY_PATH_RE.test(b) ? 1 : 0
+  if (lowA !== lowB) return lowA - lowB
+  const depthA = a.split('/').length
+  const depthB = b.split('/').length
+  if (depthA !== depthB) return depthA - depthB
+  return a.localeCompare(b)
+}
+
 async function listCodeFiles($: EngineInterface, limit: number): Promise<string[]> {
   const listed = await git($, ['ls-files', '--cached', '--others', '--exclude-standard'])
   if (listed) {
     return listed
       .split('\n')
       .filter(p => p && isCodeFile(p) && !p.split('/').some(part => IGNORED_DIRS.has(part)))
-      .sort()
+      .sort(compareCodePaths)
       .slice(0, limit)
   }
   const found: string[] = []
   const pending = ['']
-  while (pending.length && found.length < limit) {
+  const scanLimit = limit * 2
+  while (pending.length && found.length < scanLimit) {
     const dir = pending.shift()!
     for (const entry of await $.fs.list(dir || undefined)) {
       const path = dir ? `${dir}/${entry.name}` : entry.name
       if (entry.kind === 'dir' && !IGNORED_DIRS.has(entry.name)) pending.push(path)
-      else if (entry.kind === 'file' && isCodeFile(entry.name) && found.length < limit) found.push(path)
+      else if (entry.kind === 'file' && isCodeFile(entry.name) && found.length < scanLimit) found.push(path)
     }
   }
-  return found
+  return found.sort(compareCodePaths).slice(0, limit)
 }
 
 // Grafo do Graphify, relido só quando o arquivo muda; acima de 4 MiB o $.fs não lê e o CATO segue sem ele
@@ -679,12 +692,19 @@ async function loadGraph($: EngineInterface): Promise<Graph | null> {
 
 async function repoMap($: EngineInterface, focus: string | undefined, budget: number): Promise<string> {
   const files = new Map<string, string>()
-  for (const path of await listCodeFiles($, 300)) {
-    try {
-      if ((await $.fs.stat(path)).size > 200_000) continue
-      files.set(path, (await $.fs.read(path)) as string)
-    } catch {
-      // arquivo sumiu ou é ilegível: segue
+  const paths = await listCodeFiles($, 300)
+  for (let i = 0; i < paths.length; i += 25) {
+    const batch = await Promise.all(paths.slice(i, i + 25).map(async path => {
+      try {
+        if ((await $.fs.stat(path)).size > 200_000) return null
+        return [path, (await $.fs.read(path)) as string] as const
+      } catch {
+        // arquivo sumiu ou é ilegível: segue
+        return null
+      }
+    }))
+    for (const item of batch) {
+      if (item) files.set(item[0], item[1])
     }
   }
   const graph = await loadGraph($)
@@ -994,8 +1014,13 @@ async function findExtractor($: EngineInterface): Promise<Extractor> {
 
 // Falha que não diz nada sobre o arquivo (interrompido, tempo esgotado): tenta de novo na próxima vez
 const TRANSIENT_RE = /abort|timed? ?out|timeout|cancel/i
+const INLINE_READ_LIMIT = 256 * 1024
 
 async function readTranscript($: EngineInterface, file: TranscriptFile, extractor: Extractor): Promise<TranscriptEvent[] | string> {
+  if (file.size > 0 && file.size <= INLINE_READ_LIMIT) {
+    const inline = await $.fs.read(file.path).catch(() => null)
+    if (typeof inline === 'string' && inline.length > 0) return parseJsonlText(inline)
+  }
   if (extractor) {
     const argv = extractor.kind === 'awk'
       ? [extractor.bin, AWK_EXTRACT, file.path]

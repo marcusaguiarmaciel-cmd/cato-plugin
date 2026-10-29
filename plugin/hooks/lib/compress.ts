@@ -41,7 +41,7 @@ const LOCKFILES = [
 ]
 
 export function stripCdPrefix(command: string): string {
-  return command.trim().replace(/^(cd\s+[^&;]+(&&|;)\s*)+/, '')
+  return command.trim().replace(/^((?:cd|pushd|set-location|sl|echo|export|set)\s+[^&;|]+(&&|;)\s*)+/i, '')
 }
 
 export function firstWord(command: string): string {
@@ -54,9 +54,12 @@ export const isRtkCommand = (command: string): boolean => ['rtk', 'rtk.exe'].inc
 /** `ast-grep ... --json` (ou `sg`): o JSON repete byteOffset, `lines` e metadados; vira uma linha por casamento. */
 export const AST_GREP_JSON_RE = /(^|[\s;&|])(ast-grep|sg)(\.exe)?\s+(run|scan|-p|--pattern)\b[^\n]*--json/
 
+// Quando o próprio comando já termina filtrando a saída por pipe, o CATO não recomprime por cima
+const FILTER_PIPE_RE = /\|\s*(?:grep|egrep|fgrep|rg|head|tail|awk|sed|jq|wc|cut|sort|uniq|select-string|select-object)\b[^|]*$/i
+
 /** Indica se vale a pena olhar a saída deste comando (filtro barato, antes de o comando rodar). */
 export function isCompressibleCommand(command: string): boolean {
-  if (isRtkCommand(command) || CODE_READ_COMMANDS.has(firstWord(command))) return false
+  if (isRtkCommand(command) || CODE_READ_COMMANDS.has(firstWord(command)) || FILTER_PIPE_RE.test(command)) return false
   const cmd = stripCdPrefix(command)
   return TEST_RE.test(cmd) || LINTER_RE.test(cmd) || NOISY_RE.test(cmd) || /\bgit\s+(diff|show)\b/.test(cmd) || AST_GREP_JSON_RE.test(cmd)
 }

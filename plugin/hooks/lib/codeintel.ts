@@ -152,7 +152,8 @@ function pagerank(nodes: string[], edges: Map<string, Map<string, number>>, pers
 }
 
 /**
- * Mapa do repositório no estilo Aider: arquivos mais centrais primeiro, cada um com seu esqueleto, dentro do orçamento.
+ * Mapa do repositório no estilo Aider: arquivos mais centrais primeiro (PageRank ponderado por TF-IDF e
+ * penalidade de ambiguidade), cada um com seu esqueleto, dentro do orçamento.
  * `extraEdges` soma relações vindas de fora (o grafo do Graphify) às inferidas pelos símbolos.
  */
 export function buildRepoMap(
@@ -164,7 +165,8 @@ export function buildRepoMap(
   const names = [...files.keys()]
   if (!names.length) return '# [CATO RepoMap] No code files found.'
   const defs = new Map<string, Set<string>>()
-  const words = new Map<string, Set<string>>()
+  const wordCounts = new Map<string, Map<string, number>>()
+  const docFreq = new Map<string, number>()
   const definers = new Map<string, string[]>()
   for (const [name, src] of files) {
     const d = new Set<string>()
@@ -173,13 +175,27 @@ export function buildRepoMap(
       if (id && id.length >= 3) d.add(id)
     }
     defs.set(name, d)
-    words.set(name, new Set(src.match(/\b[A-Za-z_][A-Za-z0-9_]{3,}\b/g) ?? []))
+    const counts = new Map<string, number>()
+    for (const w of src.match(/\b[A-Za-z_][A-Za-z0-9_]{2,}\b/g) ?? []) {
+      counts.set(w, (counts.get(w) ?? 0) + 1)
+    }
+    wordCounts.set(name, counts)
+    for (const w of counts.keys()) docFreq.set(w, (docFreq.get(w) ?? 0) + 1)
     for (const id of d) definers.set(id, [...(definers.get(id) ?? []), name])
   }
+  const terms = (focus ?? '').toLowerCase().split(/[^a-z0-9_./-]+/).filter(t => t.length >= 2)
+  const nFiles = names.length
   const edges = new Map<string, Map<string, number>>()
-  for (const [name, ws] of words) {
+  for (const [name, counts] of wordCounts) {
     const out = new Map<string, number>()
-    for (const w of ws) for (const def of definers.get(w) ?? []) if (def !== name) out.set(def, (out.get(def) ?? 0) + 1)
+    for (const [w, tf] of counts) {
+      const targets = definers.get(w)
+      if (!targets || targets.length > 10) continue
+      const idf = Math.log(1 + nFiles / Math.max(1, docFreq.get(w) ?? 1))
+      const focusBoost = terms.some(t => w.toLowerCase().includes(t)) ? 2 : 1
+      const weight = (Math.sqrt(tf) * idf * focusBoost) / targets.length
+      for (const def of targets) if (def !== name) out.set(def, (out.get(def) ?? 0) + weight)
+    }
     edges.set(name, out)
   }
   for (const [from, targets] of extraEdges ?? []) {
@@ -188,7 +204,6 @@ export function buildRepoMap(
     for (const [to, weight] of targets) if (files.has(to) && to !== from) out.set(to, (out.get(to) ?? 0) + weight)
   }
   const personal = new Map<string, number>()
-  const terms = (focus ?? '').toLowerCase().split(/[^a-z0-9_./-]+/).filter(t => t.length >= 2)
   for (const name of names) {
     let score = 0
     for (const t of terms) {
@@ -204,9 +219,14 @@ export function buildRepoMap(
   for (const name of ordered) {
     const body = skeleton(name, files.get(name)!, 40)
     if (!body) continue
-    const section = `${name}:\n${body}`
-    const cost = estimateTokens(section)
-    if (used + cost > budgetTokens) continue
+    let section = `${name}:\n${body}`
+    let cost = estimateTokens(section)
+    if (used + cost > budgetTokens) {
+      const compactBody = skeleton(name, files.get(name)!, 12)
+      section = `${name}:\n${compactBody}`
+      cost = estimateTokens(section)
+      if (!compactBody || used + cost > budgetTokens) continue
+    }
     sections.push(section)
     used += cost
   }
@@ -214,35 +234,79 @@ export function buildRepoMap(
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox de respostas MCP grandes: blocos de 20 linhas e busca BM25 simples
+// Sandbox de respostas MCP grandes: blocos limitados por linhas/caracteres e BM25 com sub-tokenização
 // ---------------------------------------------------------------------------
 
 export type SandboxChunk = { title: string; content: string }
 
-export function chunkLines(text: string, size = 20): SandboxChunk[] {
+export function chunkLines(text: string, size = 20, maxChars = 1600): SandboxChunk[] {
   const lines = text.split('\n')
   const chunks: SandboxChunk[] = []
-  for (let i = 0; i < lines.length; i += size) {
-    chunks.push({ title: `Lines ${i + 1}-${Math.min(lines.length, i + size)}`, content: lines.slice(i, i + size).join('\n') })
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.length > maxChars) {
+      let offset = 0
+      let part = 1
+      while (offset < line.length) {
+        let end = Math.min(line.length, offset + maxChars)
+        if (end < line.length) {
+          const cut = Math.max(line.lastIndexOf('},{', end), line.lastIndexOf(',"', end), line.lastIndexOf(' ', end))
+          if (cut > offset + maxChars * 0.5) end = cut + 1
+        }
+        chunks.push({ title: `Line ${i + 1} (part ${part})`, content: line.slice(offset, end) })
+        offset = end
+        part += 1
+      }
+      i += 1
+      continue
+    }
+    const start = i + 1
+    const slice: string[] = []
+    let chars = 0
+    while (i < lines.length && slice.length < size && lines[i].length <= maxChars) {
+      if (slice.length > 0 && chars + lines[i].length > maxChars * 1.5) break
+      slice.push(lines[i])
+      chars += lines[i].length + 1
+      i += 1
+    }
+    chunks.push({ title: `Lines ${start}-${start + slice.length - 1}`, content: slice.join('\n') })
   }
   return chunks
 }
 
-const tokenize = (s: string): string[] => (s.toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])
+export function tokenize(s: string): string[] {
+  const raw = s.toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? []
+  const split =
+    s
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .match(/[\p{L}\p{N}]{2,}/gu) ?? []
+  if (split.length === raw.length && split.every((w, i) => w === raw[i])) return raw
+  const seen = new Set(raw)
+  return [...raw, ...split.filter(w => !seen.has(w))]
+}
 
 export function bm25Search(chunks: SandboxChunk[], query: string, limit = 5): SandboxChunk[] {
-  const terms = tokenize(query)
+  const terms = [...new Set(tokenize(query))]
   if (!terms.length) return []
-  const docs = chunks.map(c => tokenize(`${c.title} ${c.content}`))
-  const avg = docs.reduce((a, d) => a + d.length, 0) / Math.max(1, docs.length)
-  const df = new Map(terms.map(t => [t, docs.filter(d => d.includes(t)).length]))
+  const docs = chunks.map(c => {
+    const words = tokenize(`${c.title} ${c.content}`)
+    const freq = new Map<string, number>()
+    for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1)
+    return { len: words.length, freq }
+  })
+  const avg = docs.reduce((a, d) => a + d.len, 0) / Math.max(1, docs.length)
+  const df = new Map(terms.map(t => [t, docs.filter(d => d.freq.has(t)).length]))
   const scored = docs.map((doc, i) => {
     let score = 0
     for (const t of terms) {
-      const tf = doc.filter(w => w === t).length
+      const tf = doc.freq.get(t) ?? 0
       if (!tf) continue
       const idf = Math.log(1 + (docs.length - df.get(t)! + 0.5) / (df.get(t)! + 0.5))
-      score += (idf * tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc.length / avg)))
+      score += (idf * tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (doc.len / avg)))
     }
     return { i, score }
   })

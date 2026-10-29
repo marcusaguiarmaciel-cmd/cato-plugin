@@ -1,7 +1,7 @@
 import type { On, SessionMessage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { extractSymbol, skeleton } from '../hooks/lib/codeintel.ts'
+import { bm25Search, buildRepoMap, chunkLines, extractSymbol, skeleton } from '../hooks/lib/codeintel.ts'
 import { maskOldToolResults } from '../hooks/lib/compaction.ts'
 
 // Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
@@ -196,4 +196,58 @@ test('/cato: período só muda com número escrito', PT, async ($, on) => {
   expect(await run('  ')).toContain('últimos 30 dias')
   expect(await run('7')).toContain('últimos 7 dias')
   expect(await run('500')).toContain('últimos 90 dias')
+})
+
+test('chunkLines + bm25Search: JSON minificado em linha única é fatiado e camelCase/snake_case são indexados', () => {
+  const items = Array.from({ length: 120 }, (_, i) =>
+    JSON.stringify({
+      id: i,
+      handler: i === 77 ? 'computeLateFeeInvoice' : `regularWorker${i}`,
+      metric: i === 42 ? 'cache_creation_input_tokens' : `metric_${i}`,
+      pad: 'x'.repeat(80),
+    }),
+  )
+  const singleLineJson = `[${items.join(',')}]`
+  expect(singleLineJson.includes('\n')).toBe(false)
+  expect(singleLineJson.length).toBeGreaterThan(15_000)
+
+  const chunks = chunkLines(singleLineJson)
+  expect(chunks.length).toBeGreaterThan(8)
+  for (const c of chunks) expect(c.content.length).toBeLessThanOrEqual(2400)
+
+  const camelHit = bm25Search(chunks, 'late fee invoice', 2)
+  expect(camelHit.length).toBeGreaterThan(0)
+  expect(camelHit[0].content).toContain('computeLateFeeInvoice')
+
+  const snakeHit = bm25Search(chunks, 'creation input', 2)
+  expect(snakeHit.length).toBeGreaterThan(0)
+  expect(snakeHit[0].content).toContain('cache_creation_input_tokens')
+})
+
+test('maskOldToolResults preserva #cmd_xxxxxxxx e #sbx_xxxxxxxx no aviso de omissão', () => {
+  const oldBigWithId: SessionMessage[] = [
+    { role: 'assistant', text: '', toolUses: [{ tool_use_id: 't0', tool: 'Bash', input: { command: 'pytest' } }], handle: 'a0' },
+    { role: 'user', text: '', toolResults: [{ tool_use_id: 't0', text: `[CATO] Full output saved as #cmd_1a2b3c4d\n${'x'.repeat(3000)}` }], handle: 'u0' },
+  ]
+  const recent = [1, 2, 3, 4, 5, 6].flatMap(i => exchange(i, 100))
+  const r = maskOldToolResults([...oldBigWithId, ...recent], 6, 800)
+  expect(r.masked).toBe(1)
+  const masked = String(r.messages[1].toolResults![0].text)
+  expect(masked).toContain('#cmd_1a2b3c4d')
+  expect(masked).toContain('omitted by CATO')
+})
+
+test('buildRepoMap: ponderação TF-IDF prioriza símbolo específico de domínio sobre utilitário ubíquo', () => {
+  const files = new Map<string, string>([
+    ['src/billingEngine.ts', 'export function settleInvoiceLedger(amount: number) {\n  return amount\n}\n'],
+    ['src/logger.ts', 'export function get(key: string) {\n  return key\n}\n'],
+    ['src/checkout.ts', 'export function checkout() {\n  settleInvoiceLedger(100)\n  settleInvoiceLedger(200)\n  get("a")\n}\n'],
+    ['src/a.ts', 'export function fA() { return get("1") }\n'],
+    ['src/b.ts', 'export function fB() { return get("2") }\n'],
+  ])
+  for (let i = 0; i < 12; i++) {
+    files.set(`src/util${i}.ts`, `export function get(k: string) { return k }\n`)
+  }
+  const map = buildRepoMap(files, undefined, 2000)
+  expect(map.indexOf('src/billingEngine.ts')).toBeLessThan(map.indexOf('src/logger.ts'))
 })
