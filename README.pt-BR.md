@@ -1,6 +1,7 @@
 # CATO: Claude Adaptive Token Optimizer
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
+[![Apoiar o CATO](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/marcusaguiarmaciel-cmd)
 
 [English](README.md)
 
@@ -86,6 +87,10 @@ A skill `cato-efficiency` e o agente `cato-explorer` dizem ao modelo qual ferram
 claude plugin validate plugin
 claude plugin test plugin
 ```
+
+## Apoie o projeto
+
+Se o CATO economiza tokens e custos de API no seu dia a dia, considere [apoiar o projeto pelo GitHub Sponsors](https://github.com/sponsors/marcusaguiarmaciel-cmd).
 
 ## Licença
 
