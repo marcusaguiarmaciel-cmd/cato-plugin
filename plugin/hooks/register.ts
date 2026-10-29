@@ -162,18 +162,36 @@ async function isIgnoredHeavyDir($: EngineInterface, path: string): Promise<bool
 // Texto do último prompt digitado: um caminho citado nele foi pedido pela pessoa, e a leitura passa
 let lastPromptText = ''
 
+/** Caminho relativo à raiz do projeto (`cwd`), com `/` e sem `./` inicial; fora do projeto, o caminho normalizado. */
+async function projectRelative($: EngineInterface, path: string): Promise<string> {
+  const normalized = path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '')
+  const cwd = ((await $.session.cwd().catch(() => '')) || '').replace(/\\/g, '/').replace(/\/$/, '')
+  if (cwd && normalized.toLowerCase().startsWith(`${cwd.toLowerCase()}/`)) {
+    return normalized.slice(cwd.length + 1).replace(/^(?:\.\/)+/, '')
+  }
+  return normalized
+}
+
 /**
  * Motivo para negar a leitura de `path` pela ferramenta `tool`, ou null para deixar passar. Nega só na primeira
  * tentativa: repetir a mesma chamada, ou citar o caminho no prompt, libera (o modelo nunca fica travado).
  */
 async function heavyDenial($: EngineInterface, tool: string, path: string): Promise<string | null> {
-  const reason = heavyReason(path)
+  const rel = await projectRelative($, path)
+  const reason = heavyReason(rel) ? heavyReason(path) ?? heavyReason(rel) : null
   if (!reason) return null
   const normalized = path.replace(/\\/g, '/')
-  const base = normalized.split('/').pop() ?? normalized
+  const base = rel.split('/').pop() ?? rel
   const prompt = lastPromptText.toLowerCase()
-  if (prompt && (prompt.includes(normalized.toLowerCase()) || (base.length > 3 && prompt.includes(base.toLowerCase())))) return null
-  const key = `heavy:${tool}:${normalized}`
+  if (
+    prompt &&
+    (prompt.includes(rel.toLowerCase()) ||
+      prompt.includes(normalized.toLowerCase()) ||
+      (base.length > 3 && prompt.includes(base.toLowerCase())))
+  ) {
+    return null
+  }
+  const key = `heavy:${tool}:${rel.toLowerCase()}`
   if (acks.has(key)) {
     // Pedido de novo: a leitura entra e a economia creditada na negação sai do relatório
     const credit = heavyCredit.get(key) ?? 0
@@ -184,8 +202,8 @@ async function heavyDenial($: EngineInterface, tool: string, path: string): Prom
     })
     return null
   }
-  const byNameOnly = !GRAPHIFY_HEAVY_RE.test(path) && !HEAVY_FILE_RE.test(path)
-  if (byNameOnly && !(await isIgnoredHeavyDir($, path))) return null
+  const byNameOnly = !GRAPHIFY_HEAVY_RE.test(rel) && !HEAVY_FILE_RE.test(rel)
+  if (byNameOnly && !(await isIgnoredHeavyDir($, rel))) return null
   acks.add(key)
   return reason
 }
@@ -208,9 +226,10 @@ function cancelWarm(): void {
   warmTimer = null
 }
 
-function scheduleWarm($: EngineInterface): void {
+async function scheduleWarm($: EngineInterface): Promise<void> {
   cancelWarm()
-  if (!options.warmCache || warmsThisPause >= WARM_MAX || lastCtx < IDLE_MIN_CONTEXT || ttlMs <= WARM_LEAD_MS) return
+  const { warmCache } = await experimentalFlags($).catch(() => ({ warmCache: !!options.warmCache }))
+  if (!warmCache || warmsThisPause >= WARM_MAX || lastCtx < IDLE_MIN_CONTEXT || ttlMs <= WARM_LEAD_MS) return
   try {
     warmTimer = $.clock.after(ttlMs - WARM_LEAD_MS, () => void warmNow($).catch(() => undefined))
   } catch {
@@ -245,7 +264,7 @@ async function warmNow($: EngineInterface): Promise<void> {
     }
   })
   await saveSnapshot($)
-  scheduleWarm($)
+  await scheduleWarm($)
 }
 
 /** Na volta da pessoa: credita a reescrita evitada se, sem os aquecimentos, o cache teria expirado. */
@@ -1212,7 +1231,7 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
 
   section(m.options)
   const flags = await experimentalFlags($)
-  info(m.experimentalInEffect(onOff(flags.readGuard), onOff(flags.maskColdCompact)))
+  info(m.experimentalInEffect(onOff(flags.readGuard), onOff(flags.maskColdCompact), onOff(flags.warmCache)))
   // Valores longos cortados para caber na largura ao lado da maior chave
   const entries = Object.entries(options ?? {})
   const room = Math.max(12, width - 5 - Math.max(0, ...entries.map(([key]) => key.length)))
@@ -1229,12 +1248,12 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
 // As opções de plugin não são linhas do /config, então $.config.set não as alcança: a escolha fica no
 // $.store do CATO e vale por cima da configuração do /plugin até "padrão" devolvê-la.
 // -------------------------------------------------------------------------------------------------------
-type ExperimentalOverride = { readGuard?: boolean; maskColdCompact?: boolean }
+type ExperimentalOverride = { readGuard?: boolean; maskColdCompact?: boolean; warmCache?: boolean }
 
 const EXPERIMENTAL_KEY = 'experimental'
 let experimentalOverride: ExperimentalOverride | null = null
 
-async function experimentalFlags($: EngineInterface): Promise<{ readGuard: boolean; maskColdCompact: boolean }> {
+async function experimentalFlags($: EngineInterface): Promise<{ readGuard: boolean; maskColdCompact: boolean; warmCache: boolean }> {
   if (!experimentalOverride) {
     const raw = await $.store.get(EXPERIMENTAL_KEY).catch(() => null)
     experimentalOverride = raw && typeof raw === 'object' ? (raw as ExperimentalOverride) : {}
@@ -1242,25 +1261,46 @@ async function experimentalFlags($: EngineInterface): Promise<{ readGuard: boole
   return {
     readGuard: experimentalOverride.readGuard ?? !!options.readGuard,
     maskColdCompact: experimentalOverride.maskColdCompact ?? !!options.maskColdCompact,
+    warmCache: experimentalOverride.warmCache ?? !!options.warmCache,
   }
 }
 
 const onOff = (value: boolean): string => (value ? t().on : t().off)
 
 async function toggleExperimental($: EngineInterface, action: string, width = 100): Promise<string> {
-  const word = action.trim().toLowerCase()
+  const parts = action.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const flagMap: Record<string, keyof ExperimentalOverride> = {
+    readguard: 'readGuard',
+    maskcoldcompact: 'maskColdCompact',
+    warmcache: 'warmCache',
+  }
+  const targetFlag = parts.length >= 2 ? flagMap[parts[0]] : undefined
+  const word = (targetFlag ? parts[1] : parts[0]) ?? ''
   const turnOn = EXPERIMENTAL_WORDS.on.includes(word)
   const turnOff = EXPERIMENTAL_WORDS.off.includes(word)
   const reset = EXPERIMENTAL_WORDS.reset.includes(word)
   if (turnOn || turnOff || reset) {
-    experimentalOverride = reset ? {} : { readGuard: turnOn, maskColdCompact: turnOn }
+    await experimentalFlags($)
+    if (targetFlag) {
+      experimentalOverride = { ...(experimentalOverride ?? {}) }
+      if (reset) delete experimentalOverride[targetFlag]
+      else experimentalOverride[targetFlag] = turnOn
+    } else {
+      experimentalOverride = reset ? {} : { readGuard: turnOn, maskColdCompact: turnOn, warmCache: turnOn }
+    }
     await $.store.set(EXPERIMENTAL_KEY, experimentalOverride)
+    const nextFlags = await experimentalFlags($)
+    if (!nextFlags.warmCache) cancelWarm()
+    else await scheduleWarm($)
   }
   const m = t().experimental
   const flags = await experimentalFlags($)
   const source = Object.keys(experimentalOverride ?? {}).length ? m.sourceOverride : m.sourcePlugin
-  const out = [...heading(m.title), m.state(onOff(flags.readGuard), onOff(flags.maskColdCompact), source)]
-  if (turnOn || (!turnOff && !reset)) out.push('', ...bullet('•', m.readGuard, width), ...bullet('•', m.maskColdCompact, width))
+  const out = [...heading(m.title), m.state(onOff(flags.readGuard), onOff(flags.maskColdCompact), onOff(flags.warmCache), source)]
+  if (turnOn || (!turnOff && !reset)) {
+    out.push('', ...bullet('•', m.readGuard, width), ...bullet('•', m.maskColdCompact, width), ...bullet('•', m.warmCache, width))
+  }
+  if (flags.warmCache) out.push('', ...wrap(`⚠ ${m.keepAliveWarn}`, width))
   if (!turnOn && !turnOff && !reset) out.push('', ...wrap(m.usage, width))
   else if (turnOn) out.push('', ...wrap(m.afterOn, width))
   return out.join('\n')
@@ -1292,6 +1332,10 @@ async function cleanupOldFiles($: EngineInterface): Promise<void> {
 
 export const register: Register = (on, rawOptions) => {
   options = rawOptions as unknown as Options
+  sandboxSkipRe = undefined
+  langDetected = false
+  experimentalOverride = null
+  cancelWarm()
   bands = String(options.contextWarn ?? '')
     .split(',')
     .map(s => Number(s.trim()))
@@ -1368,7 +1412,7 @@ export const register: Register = (on, rawOptions) => {
     if (!warming) {
       pauseSince = now
       warmsThisPause = 0
-      scheduleWarm($)
+      await scheduleWarm($)
     }
     return result
   })
@@ -1565,7 +1609,8 @@ export const register: Register = (on, rawOptions) => {
       if (!reason) return next(e)
       // Só o Read tem tamanho conhecido; Grep e Glob negados contam sem tokens
       const size = e.tool === 'Read' ? (await $.fs.stat(target).catch(() => null))?.size ?? 0 : 0
-      heavyCredit.set(`heavy:${String(e.tool)}:${target.replace(/\\/g, '/')}`, readTokens(size))
+      const rel = await projectRelative($, target)
+      heavyCredit.set(`heavy:${String(e.tool)}:${rel.toLowerCase()}`, readTokens(size))
       await bumpDay($, day => {
         day.blockedReads += 1
         day.blockedTokens += readTokens(size)
@@ -1664,7 +1709,7 @@ export const register: Register = (on, rawOptions) => {
       if (ran.deny !== undefined || ran.isError || !/\.(json|py)$/i.test(path)) return ran
       const problem = await syntaxProblem($, path).catch(() => null)
       return problem ? ({ ...ran, context: [...(ran.context ?? []), problem] } as typeof ran) : ran
-    })
+    }).catch(($, e, next) => (next.called ? Promise.reject(new Error('CATO: failed after editing the file')) : next(e)))
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -1781,7 +1826,7 @@ export const register: Register = (on, rawOptions) => {
       day.sandboxTokens += credit
     })
     return withText(ran, summary)
-  })
+  }).catch(($, e, next) => (next.called ? Promise.reject(new Error('CATO: failed after the MCP call')) : next(e)))
 
   // ---------------------------------------------------------------------------------------------------
   // Ferramentas do CATO para o modelo e o comando /cato
@@ -1905,7 +1950,7 @@ export const register: Register = (on, rawOptions) => {
     const width = columns(e)
     if (['import', 'importar'].includes(arg)) return { text: await importHistory($, () => next.budget.remainingMs, width) }
     if (arg === 'doctor') return { text: await doctor($, width) }
-    const experimental = arg.match(/^experimenta(?:l|is|les)(?:\s+(\S+))?$/)
+    const experimental = arg.match(/^experimenta(?:l|is|les)(?:\s+(.+))?$/)
     if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '', width) }
     return { text: await costReport($, days(arg), width) }
   })

@@ -14,7 +14,7 @@ const en = {
     catoHint: '[days | import | doctor | experimental [on|off|default]]',
     doctor: 'CATO: diagnose what spends context on this machine (changes nothing)',
     import: 'CATO: import the cost of sessions from before CATO was installed',
-    experimental: 'CATO: show, turn on or turn off the experimental features (readGuard, maskColdCompact)',
+    experimental: 'CATO: show, turn on or turn off the experimental features (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[on | off | default]',
   },
 
@@ -126,7 +126,7 @@ const en = {
     folder: (label: string, files: string, mb: string, days: string) => `${label}: ${files} files, ${mb} MB (deleted after ${days} days).`,
     historyImported: (n: string, from: string, to: string) => `Imported history: ${n} calls (${from} – ${to}).`,
     historyMissing: 'History not imported yet: /cato-import',
-    experimentalInEffect: (rg: string, mcc: string) => `Experimental features in effect: readGuard ${rg}, maskColdCompact ${mcc} (/cato-experimental).`,
+    experimentalInEffect: (rg: string, mcc: string, wc: string) => `Experimental features in effect: readGuard ${rg}, maskColdCompact ${mcc}, warmCache ${wc} (/cato-experimental).`,
   },
 
   import: {
@@ -146,13 +146,15 @@ const en = {
 
   experimental: {
     title: 'CATO · Experimental features',
-    state: (rg: string, mcc: string, source: string) => `readGuard ${rg} · maskColdCompact ${mcc} (${source})`,
+    state: (rg: string, mcc: string, wc: string, source: string) => `readGuard ${rg} · maskColdCompact ${mcc} · warmCache ${wc} (${source})`,
     sourceOverride: 'set with /cato-experimental',
     sourcePlugin: 'from the /plugin settings',
     readGuard: 'readGuard: a full Read of a code file over 60 KB first gets the outline with line numbers; asking again lets it through.',
     maskColdCompact: 'maskColdCompact: with an expired cache, large old tool results become one line before the summary.',
+    warmCache: 'warmCache: with a large context (≥ 150k) and the session idle, sends up to 2 tiny keep-alive calls 3 min before the cache expires.',
+    keepAliveWarn: 'Note: warmCache makes up to 2 background keep-alive API calls per pause while the session is open (~0.1× input price each) to avoid a full cache rewrite on return.',
     usage: 'Use /cato-experimental on, off, or default to follow the /plugin settings again.',
-    afterOn: '/cato shows how many reads readGuard redirected and how many were requested again.',
+    afterOn: '/cato shows how many reads readGuard redirected, how many were requested again, and what warmCache cost and saved.',
   },
 
   toast: {
@@ -199,7 +201,7 @@ const pt: Messages = {
     catoHint: '[dias | import | doctor | experimental [on|off|default]]',
     doctor: 'CATO: diagnóstico do que gasta contexto nesta máquina (não altera nada)',
     import: 'CATO: importa o custo das sessões anteriores à instalação',
-    experimental: 'CATO: mostra, liga ou desliga os recursos experimentais (readGuard, maskColdCompact)',
+    experimental: 'CATO: mostra, liga ou desliga os recursos experimentais (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[ligar | desligar | padrão]',
   },
 
@@ -309,7 +311,7 @@ const pt: Messages = {
     folder: (label, files, mb, days) => `${label}: ${files} arquivos, ${mb} MB (apagados após ${days} dias).`,
     historyImported: (n, from, to) => `Histórico importado: ${n} chamadas (${from} – ${to}).`,
     historyMissing: 'Histórico ainda não importado: /cato-import',
-    experimentalInEffect: (rg, mcc) => `Experimentais em vigor: readGuard ${rg}, maskColdCompact ${mcc} (/cato-experimental).`,
+    experimentalInEffect: (rg, mcc, wc) => `Experimentais em vigor: readGuard ${rg}, maskColdCompact ${mcc}, warmCache ${wc} (/cato-experimental).`,
   },
 
   import: {
@@ -328,13 +330,15 @@ const pt: Messages = {
 
   experimental: {
     title: 'CATO · Recursos experimentais',
-    state: (rg, mcc, source) => `readGuard ${rg} · maskColdCompact ${mcc} (${source})`,
+    state: (rg, mcc, wc, source) => `readGuard ${rg} · maskColdCompact ${mcc} · warmCache ${wc} (${source})`,
     sourceOverride: 'escolhido por /cato-experimental',
     sourcePlugin: 'configuração do /plugin',
     readGuard: 'readGuard: o Read inteiro de código acima de 60 KB recebe antes o esqueleto com as linhas; pedir de novo libera.',
     maskColdCompact: 'maskColdCompact: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo.',
+    warmCache: 'warmCache: com contexto grande (≥ 150k) e a sessão parada, faz até 2 chamadas mínimas de keep-alive 3 min antes de o cache expirar.',
+    keepAliveWarn: 'Aviso: o warmCache faz até 2 chamadas de keep-alive em segundo plano por pausa com a sessão aberta (~0,1× o preço de entrada cada) para evitar a reescrita inteira do cache na volta.',
     usage: 'Use /cato-experimental ligar, desligar ou padrão para voltar a seguir o /plugin.',
-    afterOn: 'O /cato mostra quantas leituras o readGuard desviou e quantas foram pedidas de novo.',
+    afterOn: 'O /cato mostra quantas leituras o readGuard desviou, quantas foram pedidas de novo e quanto o warmCache custou e evitou.',
   },
 
   toast: {
@@ -379,7 +383,7 @@ const es: Messages = {
     catoHint: '[días | import | doctor | experimental [on|off|default]]',
     doctor: 'CATO: diagnóstico de lo que gasta contexto en esta máquina (no cambia nada)',
     import: 'CATO: importa el costo de las sesiones anteriores a la instalación',
-    experimental: 'CATO: muestra, activa o desactiva las funciones experimentales (readGuard, maskColdCompact)',
+    experimental: 'CATO: muestra, activa o desactiva las funciones experimentales (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[activar | desactivar | predeterminado]',
   },
 
@@ -489,7 +493,7 @@ const es: Messages = {
     folder: (label, files, mb, days) => `${label}: ${files} archivos, ${mb} MB (se borran a los ${days} días).`,
     historyImported: (n, from, to) => `Historial importado: ${n} llamadas (${from} – ${to}).`,
     historyMissing: 'Historial aún no importado: /cato-import',
-    experimentalInEffect: (rg, mcc) => `Experimentales en vigor: readGuard ${rg}, maskColdCompact ${mcc} (/cato-experimental).`,
+    experimentalInEffect: (rg, mcc, wc) => `Experimentales en vigor: readGuard ${rg}, maskColdCompact ${mcc}, warmCache ${wc} (/cato-experimental).`,
   },
 
   import: {
@@ -508,13 +512,15 @@ const es: Messages = {
 
   experimental: {
     title: 'CATO · Funciones experimentales',
-    state: (rg, mcc, source) => `readGuard ${rg} · maskColdCompact ${mcc} (${source})`,
+    state: (rg, mcc, wc, source) => `readGuard ${rg} · maskColdCompact ${mcc} · warmCache ${wc} (${source})`,
     sourceOverride: 'elegido con /cato-experimental',
     sourcePlugin: 'configuración de /plugin',
     readGuard: 'readGuard: un Read completo de código de más de 60 KB recibe antes el esqueleto con las líneas; pedirlo de nuevo lo deja pasar.',
     maskColdCompact: 'maskColdCompact: con la caché expirada, los resultados de herramientas antiguos y grandes se vuelven una línea antes del resumen.',
+    warmCache: 'warmCache: con contexto grande (≥ 150k) y la sesión parada, hace hasta 2 llamadas mínimas de keep-alive 3 min antes de que expire la caché.',
+    keepAliveWarn: 'Aviso: warmCache hace hasta 2 llamadas de keep-alive en segundo plano por pausa con la sesión abierta (~0,1× el precio de entrada cada una) para evitar reescribir toda la caché al volver.',
     usage: 'Usa /cato-experimental activar, desactivar o predeterminado para volver a seguir /plugin.',
-    afterOn: '/cato muestra cuántas lecturas desvió readGuard y cuántas se pidieron de nuevo.',
+    afterOn: '/cato muestra cuántas lecturas desvió readGuard, cuántas se pidieron de nuevo y cuánto costó y ahorró warmCache.',
   },
 
   toast: {

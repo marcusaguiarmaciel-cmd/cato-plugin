@@ -56,7 +56,7 @@ O que só o modelo lê (negações, rodapés de compressão, descrições de fer
 | Forks | Pede um subagente com contexto limpo |
 | Ferramentas | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
 | Import do histórico | Arquivos acima de 4 MiB passam pelo awk (no Windows, o do Git for Windows, mesmo fora do PATH) ou, sem awk, pelo PowerShell; leituras interrompidas são retomadas na próxima execução |
-| Experimentais (desligados) | `readGuard`: o Read inteiro de código acima de 60 KB recebe antes o esqueleto, e pedir de novo libera. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo. `warmCache` (no `/plugin`): com contexto grande e a sessão parada, uma chamada mínima 3 minutos antes de o cache expirar o mantém quente (no máximo 2 por pausa); o `/cato` mostra quanto custou e quanto evitou |
+| Experimentais (desligados) | `readGuard`: o Read inteiro de código acima de 60 KB recebe antes o esqueleto, e pedir de novo libera. `maskColdCompact`: com o cache expirado, resultados de ferramenta antigos e grandes viram uma linha antes do resumo. `warmCache`: com contexto grande e a sessão parada, uma chamada mínima 3 minutos antes de o cache expirar o mantém quente (no máximo 2 por pausa); o `/cato` mostra quanto custou e quanto evitou |
 
 As opções ficam no `/plugin`, na configuração do CATO.
 

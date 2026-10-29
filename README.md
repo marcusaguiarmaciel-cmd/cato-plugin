@@ -56,7 +56,7 @@ What only the model reads (denials, compression footers, tool descriptions, the 
 | Forks | Asks for a subagent with a clean context |
 | Tools | `mcp__cato__repo_map`, `read_symbol`, `structural_search`, `graph_query`, `search_sandbox`, `cost_report` |
 | History import | Files over 4 MiB go through awk (on Windows, Git for Windows' awk even outside the PATH) or, without awk, PowerShell; interrupted reads resume on the next run |
-| Experimental (off) | `readGuard`: a full Read of a code file over 60 KB first gets the outline, and asking again lets it through. `maskColdCompact`: with an expired cache, large old tool results become one line before the summary. `warmCache` (in `/plugin`): with a large context and the session idle, one tiny call 3 minutes before the cache expires keeps it warm (at most 2 per pause); `/cato` shows what it cost and what it avoided |
+| Experimental (off) | `readGuard`: a full Read of a code file over 60 KB first gets the outline, and asking again lets it through. `maskColdCompact`: with an expired cache, large old tool results become one line before the summary. `warmCache`: with a large context and the session idle, one tiny call 3 minutes before the cache expires keeps it warm (at most 2 per pause); `/cato` shows what it cost and what it avoided |
 
 Options live in `/plugin`, in CATO's settings.
 

@@ -108,8 +108,10 @@ test('sem configuração, o idioma do sistema decide', { options: { language: 'a
 
 test('/cato-experimental aceita palavras dos três idiomas', { options: { language: 'es' } }, async ($, on) => {
   world(on)
-  expect(await run($, 'cato-experimental', 'activar')).toContain('readGuard activado · maskColdCompact activado (elegido con /cato-experimental)')
-  expect(await run($, 'cato-experimental', 'off')).toContain('readGuard desactivado · maskColdCompact desactivado')
+  const onText = await run($, 'cato-experimental', 'activar')
+  expect(onText).toContain('readGuard activado · maskColdCompact activado · warmCache activado (elegido con /cato-experimental)')
+  expect(onText).toContain('⚠ Aviso: warmCache hace hasta 2 llamadas de keep-alive')
+  expect(await run($, 'cato-experimental', 'off')).toContain('readGuard desactivado · maskColdCompact desactivado · warmCache desactivado')
   expect(await run($, 'cato-experimental', 'padrão')).toContain('(configuración de /plugin)')
 })
 

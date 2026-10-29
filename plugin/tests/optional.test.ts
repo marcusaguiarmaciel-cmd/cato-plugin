@@ -1,6 +1,7 @@
 import type { On, SessionMessage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
+import { extractSymbol, skeleton } from '../hooks/lib/codeintel.ts'
 import { maskOldToolResults } from '../hooks/lib/compaction.ts'
 
 // Textos para a pessoa em português, sem depender do idioma da máquina que roda os testes
@@ -96,32 +97,60 @@ test('maskColdCompact: com cache quente a compactação recebe as mensagens inta
 
 const CMD = (args: string) => ({ command: 'cato', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
 
-test('/cato experimental: ligar vale na hora e persiste; padrão volta a seguir o /plugin', PT, async ($, on) => {
+test('/cato experimental: ligar ativa os 3 com aviso de keep-alive e persiste; padrão volta a seguir o /plugin', PT, async ($, on) => {
   project(on)
   const run = async (args: string) => String(((await $.command.run(CMD(args))) as { text?: string }).text)
-  expect(await run('experimental')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
+  expect(await run('experimental')).toContain('readGuard desligado · maskColdCompact desligado · warmCache desligado (configuração do /plugin)')
 
-  expect(await run('experimental ligar')).toContain('readGuard ligado · maskColdCompact ligado (escolhido por /cato-experimental)')
+  const turnedOn = await run('experimental ligar')
+  expect(turnedOn).toContain('readGuard ligado · maskColdCompact ligado · warmCache ligado (escolhido por /cato-experimental)')
+  expect(turnedOn).toContain('⚠ Aviso: o warmCache faz até 2 chamadas de keep-alive')
   expect(String((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny)).toContain('[CATO] src/big.ts is')
-  expect(await run('doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado')
+  expect(await run('doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado, warmCache ligado')
 
-  expect(await run('experimental padrão')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
+  // Também aceita desligar só o warmCache mantendo os outros dois ligados
+  const withoutWarm = await run('experimental warmCache desligar')
+  expect(withoutWarm).toContain('readGuard ligado · maskColdCompact ligado · warmCache desligado (escolhido por /cato-experimental)')
+  expect(withoutWarm).not.toContain('⚠ Aviso:')
+
+  expect(await run('experimental padrão')).toContain('readGuard desligado · maskColdCompact desligado · warmCache desligado (configuração do /plugin)')
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/other-big.ts' })).deny).toBeUndefined()
 })
 
 test('/cato-experimental e /cato-doctor: comandos próprios fazem o mesmo que os subcomandos', PT, async ($, on) => {
   project(on)
   const run = async (command: string, args = '') => String(((await $.command.run({ ...CMD(args), command })) as { text?: string }).text)
-  expect(await run('cato-experimental', 'Ligar')).toContain('readGuard ligado · maskColdCompact ligado (escolhido por /cato-experimental)')
-  expect(await run('cato-doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado')
-  expect(await run('cato-experimental', 'padrão')).toContain('readGuard desligado · maskColdCompact desligado (configuração do /plugin)')
+  expect(await run('cato-experimental', 'Ligar')).toContain('readGuard ligado · maskColdCompact ligado · warmCache ligado (escolhido por /cato-experimental)')
+  expect(await run('cato-doctor')).toContain('Experimentais em vigor: readGuard ligado, maskColdCompact ligado, warmCache ligado')
+  expect(await run('cato-experimental', 'padrão')).toContain('readGuard desligado · maskColdCompact desligado · warmCache desligado (configuração do /plugin)')
 })
 
-test('/cato experimental desligar vale por cima do /plugin', { options: { language: 'pt', readGuard: true, maskColdCompact: true } }, async ($, on) => {
+test('/cato experimental desligar vale por cima do /plugin', { options: { language: 'pt', readGuard: true, maskColdCompact: true, warmCache: true } }, async ($, on) => {
   project(on)
   const text = String(((await $.command.run(CMD('experimental desligar'))) as { text?: string }).text)
-  expect(text).toContain('readGuard desligado · maskColdCompact desligado')
+  expect(text).toContain('readGuard desligado · maskColdCompact desligado · warmCache desligado')
   expect((await $.tool.call({ tool: 'Read', file_path: 'src/big.ts' })).deny).toBeUndefined()
+})
+
+test('extractSymbol e skeleton: chaves dentro de strings, regexes e comentários não quebram o bloco', () => {
+  const src = [
+    'export function parseBraces(input: string) {',
+    '  // comentário com } solta',
+    '  const re = /\\{/g',
+    '  const ch = "{"',
+    "  if (input.includes('{')) {",
+    '    return input.replace(re, "}")',
+    '  }',
+    '  return input',
+    '}',
+    'export function nextFn() {',
+    '  return 1',
+    '}',
+  ].join('\n')
+  const sym = extractSymbol('src/parse.ts', src, 'parseBraces')
+  expect(sym).toMatchObject({ start: 1, end: 9 })
+  expect(skeleton('src/parse.ts', src)).toContain('[L1-L9] export function parseBraces(input: string) {')
+  expect(skeleton('src/parse.ts', src)).toContain('[L10-L12] export function nextFn() {')
 })
 
 test('relatório: economia do RTK pelo rtk gain entra na soma, só dos dias do período', PT, async ($, on) => {

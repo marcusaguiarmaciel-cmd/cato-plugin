@@ -72,13 +72,17 @@ test('leituras pesadas: build/ versionado passa; node_modules nega uma vez e lib
   expect(checked).toEqual(['src/build', 'web/node_modules'])
 })
 
-test('leituras pesadas: caminho citado no prompt passa direto', PT, async ($, on) => {
+test('leituras pesadas: caminho citado no prompt passa direto, mesmo quando o Read usa caminho absoluto', PT, async ($, on) => {
   mock.store(on)
   mock.clock(on)
+  on('session.cwd', () => ({ value: 'C:/build/meu-projeto' }))
   on('prompt.submit', (_, e) => ({ text: e.text }))
   on('tool.call', () => ({ result: { file: { content: 'ok' } } }))
-  await $.prompt.submit({ text: 'olhe o package-lock.json para ver a versão', wait: false, origin: { kind: 'composer' } })
-  expect((await $.tool.call({ tool: 'Read', file_path: 'package-lock.json' })).deny).toBeUndefined()
+  // Pasta pai fora do projeto chamada build/ não bloqueia arquivos normais do projeto
+  expect((await $.tool.call({ tool: 'Read', file_path: 'C:/build/meu-projeto/src/app.ts' })).deny).toBeUndefined()
+  // Caminho relativo citado no prompt libera o Read com caminho absoluto
+  await $.prompt.submit({ text: 'olhe o web/package-lock.json para ver a versão', wait: false, origin: { kind: 'composer' } })
+  expect((await $.tool.call({ tool: 'Read', file_path: 'C:/build/meu-projeto/web/package-lock.json' })).deny).toBeUndefined()
 })
 
 test('guard depois de reload: o retrato da sessão no store faz o prompt ser segurado com o cache expirado', PT, async ($, on) => {

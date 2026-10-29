@@ -40,6 +40,17 @@ export function declaredName(line: string): string | null {
 
 const isPython = (path: string) => path.toLowerCase().endsWith('.py')
 
+// Tira strings, regexes e comentários de uma linha antes de contar { e }
+const LINE_NOISE_RE =
+  /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\/.*$|\/\*[\s\S]*?\*\/|\/(?![/*\s])(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\\])+\/[dgimsuvy]*/g
+
+function cleanBraces(line: string): { open: number; delta: number } {
+  const clean = line.replace(LINE_NOISE_RE, m => (m.startsWith('//') || m.startsWith('/*') ? '' : '""'))
+  const open = (clean.match(/\{/g) ?? []).length
+  const close = (clean.match(/\}/g) ?? []).length
+  return { open, delta: open - close }
+}
+
 /** Fim do bloco que começa na linha `idx`: chaves balanceadas, ou indentação em Python. */
 function blockEnd(lines: string[], idx: number, python: boolean): number {
   if (python) {
@@ -53,23 +64,25 @@ function blockEnd(lines: string[], idx: number, python: boolean): number {
     }
     return end
   }
-  let balance = (lines[idx].match(/\{/g) ?? []).length - (lines[idx].match(/\}/g) ?? []).length
-  if (!lines[idx].includes('{') || balance <= 0) {
+  const first = cleanBraces(lines[idx])
+  let balance = first.delta
+  if (!first.open || balance <= 0) {
     // Assinatura que abre a chave numa linha seguinte
     for (let j = idx + 1; j < Math.min(lines.length, idx + 5); j++) {
-      if (lines[j].includes('{')) {
+      if (declaredName(lines[j])) break
+      if (cleanBraces(lines[j]).open) {
         balance = 0
         for (let k = idx; k < lines.length; k++) {
-          balance += (lines[k].match(/\{/g) ?? []).length - (lines[k].match(/\}/g) ?? []).length
+          balance += cleanBraces(lines[k]).delta
           if (k >= j && balance <= 0) return k
         }
         return lines.length - 1
       }
     }
-    return Math.min(lines.length - 1, idx + 45)
+    return first.open ? idx : Math.min(lines.length - 1, idx + 45)
   }
   for (let j = idx + 1; j < lines.length; j++) {
-    balance += (lines[j].match(/\{/g) ?? []).length - (lines[j].match(/\}/g) ?? []).length
+    balance += cleanBraces(lines[j]).delta
     if (balance <= 0) return j
   }
   return lines.length - 1
