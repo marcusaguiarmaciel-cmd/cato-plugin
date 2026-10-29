@@ -2,10 +2,17 @@
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
 [![Sponsor CATO](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/marcusaguiarmaciel-cmd)
+[![Release](https://img.shields.io/github/v/release/marcusaguiarmaciel-cmd/cato-plugin?color=22c55e&label=release)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.290-38bdf8)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin)
+[![Tests](https://img.shields.io/badge/tests-71_passing-4ade80)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/tree/main/plugin/tests)
 
 [Português](README.pt-BR.md)
 
 A Claude Code plugin that cuts token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation. It runs entirely inside Claude Code, with no Python and no external process per hook, and integrates with Serena, Graphify, ast-grep and GitHub MCP.
+
+<p align="center">
+  <img src=".github/assets/cato-preview.svg" alt="CATO /cato and /cato-doctor terminal preview" width="100%" />
+</p>
 
 ## Install
 

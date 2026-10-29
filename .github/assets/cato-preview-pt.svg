@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 650" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0f17"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#161f30"/>
+      <stop offset="100%" stop-color="#1a2436"/>
+    </linearGradient>
+    <linearGradient id="statusGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#132a2e"/>
+      <stop offset="100%" stop-color="#162032"/>
+    </linearGradient>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace; font-size: 12.2px; fill: #e2e8f0; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; font-weight: 600; fill: #94a3b8; }
+      .cmd { fill: #38bdf8; font-weight: 700; }
+      .h1 { fill: #f8fafc; font-weight: 700; font-size: 13px; }
+      .sec { fill: #eab308; font-weight: 700; }
+      .dim { fill: #94a3b8; }
+      .green { fill: #4ade80; font-weight: 600; }
+      .amber { fill: #fbbf24; font-weight: 600; }
+      .red { fill: #f87171; font-weight: 600; }
+      .cyan { fill: #22d3ee; font-weight: 600; }
+    </style>
+  </defs>
+
+  <!-- Outer Terminal Window -->
+  <rect x="4" y="4" width="1112" height="642" rx="12" fill="url(#bgGrad)" stroke="#334155" stroke-width="1.5"/>
+  
+  <!-- Window Title Bar -->
+  <path d="M 4 16 Q 4 4 16 4 L 1104 4 Q 1116 4 1116 16 L 1116 42 L 4 42 Z" fill="url(#headerGrad)"/>
+  <line x1="4" y1="42" x2="1116" y2="42" stroke="#1e293b" stroke-width="1"/>
+  <circle cx="26" cy="23" r="6.5" fill="#ef4444"/>
+  <circle cx="46" cy="23" r="6.5" fill="#f59e0b"/>
+  <circle cx="66" cy="23" r="6.5" fill="#10b981"/>
+  <text x="560" y="28" text-anchor="middle" class="title">Claude Code — CATO: Claude Adaptive Token Optimizer (v1.4.0)</text>
+
+  <!-- Vertical Divider -->
+  <line x1="572" y1="42" x2="572" y2="608" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- ================= LEFT PANEL: /cato ================= -->
+  <g transform="translate(22, 66)">
+    <text x="0" y="0" class="mono"><tspan class="cmd">❯ /cato</tspan></text>
+    <text x="0" y="22" class="mono h1">CATO · Custo real — últimos 30 dias</text>
+    <text x="0" y="38" class="mono dim">Preço oficial × tokens faturados de cada chamada à API.</text>
+    <line x1="0" y1="46" x2="528" y2="46" stroke="#334155" stroke-width="1"/>
+
+    <!-- Cost Table -->
+    <text x="0" y="64" class="mono dim" xml:space="preserve">Período        Custo   Chamadas     Tokens   Ctx méd   Ctx máx</text>
+    <text x="0" y="81" class="mono" xml:space="preserve">hoje       <tspan class="green">US$ 4,80</tspan>         24    3,8 mi   158 mil   312 mil</text>
+    <text x="0" y="97" class="mono" xml:space="preserve">7 dias    <tspan class="green">US$ 38,40</tspan>        186   29,4 mi   172 mil   465 mil</text>
+    <text x="0" y="113" class="mono" xml:space="preserve">30 dias  <tspan class="green">US$ 142,10</tspan>        712  114,2 mi   164 mil   520 mil</text>
+    <text x="0" y="132" class="mono dim">Subagentes: US$ 18,90 em 148 chamadas (13% do total).</text>
+
+    <!-- Cache misses -->
+    <text x="0" y="158" class="mono sec">Cache misses — conversa principal (&gt; 100 mil tokens)</text>
+    <text x="0" y="176" class="mono" xml:space="preserve">Pausa maior que o cache              9×   <tspan class="amber">US$ 16,40</tspan></text>
+    <text x="0" y="192" class="mono" xml:space="preserve">Troca de modelo                      4×    <tspan class="amber">US$ 7,80</tspan></text>
+    <text x="0" y="208" class="mono" xml:space="preserve">Outras (prefixo mudou)               2×    <tspan class="dim">US$ 3,10</tspan></text>
+    <text x="0" y="226" class="mono dim">• Reconstruções após /compact (não são miss): 14× · US$ 11,20</text>
+
+    <!-- Cost by context size -->
+    <text x="0" y="252" class="mono sec">Custo da conversa principal por tamanho de contexto</text>
+    <text x="0" y="270" class="mono" xml:space="preserve">&lt; 100k    US$ 22,40   18%   │  250–400k  US$ 39,40   32%</text>
+    <text x="0" y="286" class="mono" xml:space="preserve">100–250k  US$ 46,80   38%   │  &gt; 400k    US$ 14,60   12%</text>
+
+    <!-- Tokens saved -->
+    <text x="0" y="314" class="mono sec">Tokens economizados</text>
+    <text x="0" y="332" class="mono" xml:space="preserve">Comandos reescritos pelo RTK        94×   <tspan class="cyan">1,4 mi</tspan></text>
+    <text x="0" y="348" class="mono" xml:space="preserve">Respostas MCP grandes em sandbox    38×  <tspan class="cyan">820 mil</tspan></text>
+    <text x="0" y="364" class="mono" xml:space="preserve">Saídas de comando comprimidas       67×  <tspan class="cyan">610 mil</tspan></text>
+    <text x="0" y="380" class="mono" xml:space="preserve">Leituras pesadas negadas            19×  <tspan class="cyan">490 mil</tspan></text>
+    <text x="0" y="396" class="mono" xml:space="preserve">Leituras trocadas pelo esqueleto    12×  <tspan class="cyan">240 mil</tspan></text>
+    <text x="0" y="412" class="mono" xml:space="preserve">Resultados mascarados no resumo     29×  <tspan class="cyan">180 mil</tspan></text>
+
+    <rect x="0" y="424" width="528" height="44" rx="6" fill="#0f291e" stroke="#166534" stroke-width="1"/>
+    <text x="10" y="443" class="mono green">Total: 3,7 mi tokens a menos no contexto ≈ US$ 29,60 na entrada</text>
+    <text x="10" y="460" class="mono dim">Cada turno seguinte também deixa de relê-los · 6 prompts segurados</text>
+
+    <!-- Recommendations -->
+    <text x="0" y="490" class="mono sec">O que mais economizaria</text>
+    <text x="0" y="508" class="mono">• Ao voltar de pausa longa, use /clear ou /compact antes de seguir.</text>
+    <text x="0" y="524" class="mono dim">Inclui 418 chamadas importadas dos transcripts (01/out – 27/out).</text>
+  </g>
+
+  <!-- ================= RIGHT PANEL: /cato-doctor & Guard ================= -->
+  <g transform="translate(592, 66)">
+    <text x="0" y="0" class="mono"><tspan class="cmd">❯ /cato-doctor</tspan></text>
+    <text x="0" y="22" class="mono h1">CATO · Diagnóstico</text>
+    <text x="0" y="38" class="mono dim">Só leitura: nada foi alterado. Idioma: português (auto).</text>
+    <line x1="0" y1="46" x2="504" y2="46" stroke="#334155" stroke-width="1"/>
+
+    <text x="0" y="64" class="mono sec">Conflitos e Integrações</text>
+    <text x="0" y="82" class="mono">✅ Sem restos da versão Python (hooks ou servidor MCP).</text>
+    <text x="0" y="98" class="mono">✅ RTK instalado · ✅ ast-grep instalado (structural_search)</text>
+    <text x="0" y="114" class="mono">✅ Grafo do Graphify · ✅ Serena MCP · ✅ GitHub MCP</text>
+    <text x="0" y="130" class="mono">✅ Python encontrado: checagem de .py após edições ligada.</text>
+
+    <text x="0" y="156" class="mono sec">Contexto fixo (vai em toda chamada)</text>
+    <text x="0" y="174" class="mono">✅ CLAUDE.md: 94 linhas (abaixo do limite recomendado de 200).</text>
+    <text x="0" y="190" class="mono">ℹ️ Ferramentas MCP: 22 (18 via ToolSearch), ≈ 2,8 mil tokens.</text>
+    <text x="0" y="206" class="mono">ℹ️ Ferramentas do CATO: 6, ≈ 410 tokens de descrições.</text>
+
+    <text x="0" y="232" class="mono sec">Cache e Opções Ativas</text>
+    <text x="0" y="250" class="mono amber">⚠️ model=opusplan: entrar e sair do modo de plano troca</text>
+    <text x="0" y="266" class="mono amber">   de modelo e relê a conversa inteira sem cache.</text>
+    <text x="0" y="282" class="mono">✅ TTL da conversa principal: 60 min · Subagentes: 5 min.</text>
+    <text x="0" y="298" class="mono">ℹ️ Experimentais: readGuard on, maskColdCompact on, warmCache on.</text>
+
+    <!-- Box showing Cold Cache Prompt Guard in action -->
+    <rect x="0" y="322" width="504" height="118" rx="8" fill="#231c0d" stroke="#854d0e" stroke-width="1.2"/>
+    <text x="12" y="344" class="mono amber">⏸ O CATO segurou este prompt 1×: o cache expirou (74 min parado).</text>
+    <text x="12" y="364" class="mono">Continuar agora reescreve <tspan class="amber">340 mil tokens ≈ US$ 2,72</tspan>. Opções:</text>
+    <text x="12" y="384" class="mono">• <tspan class="green">/clear ≈ US$ 0,01</tspan> — começar limpo (melhor p/ outra tarefa)</text>
+    <text x="12" y="402" class="mono">• <tspan class="cyan">/compact ≈ US$ 0,38</tspan> uma vez — contexto cai para ~20 mil</text>
+    <text x="12" y="422" class="mono dim">• Envie de novo para continuar mesmo assim (não segura 2×).</text>
+
+    <!-- Box showing BM25 MCP Sandbox in action -->
+    <rect x="0" y="452" width="504" height="76" rx="8" fill="#0f1e2e" stroke="#1e3a5f" stroke-width="1.2"/>
+    <text x="12" y="473" class="mono cyan">[CATO Sandbox #sbx_8f41c92a] 48,2k chars (~12k tokens → 1,1k)</text>
+    <text x="12" y="492" class="mono">Começo + fim mantidos. Busque com <tspan class="cmd">mcp__cato__search_sandbox</tspan></text>
+    <text x="12" y="510" class="mono dim">ou repita a mesma chamada se precisar do conteúdo inteiro.</text>
+  </g>
+
+  <!-- Bottom Status Bar -->
+  <path d="M 4 608 L 1116 608 L 1116 634 Q 1116 646 1104 646 L 16 646 Q 4 646 4 634 Z" fill="url(#statusGrad)"/>
+  <line x1="4" y1="608" x2="1116" y2="608" stroke="#1e293b" stroke-width="1"/>
+  <text x="22" y="631" class="mono"><tspan class="cyan">● CATO</tspan>: 184k ctx · próx. turno ≈ <tspan class="green">US$ 0,04</tspan> · cache expira em <tspan class="green">48 min</tspan> · sessão <tspan class="green">US$ 1,42</tspan></text>
+  <text x="1098" y="631" text-anchor="end" class="mono dim">mcp__cato__repo_map · read_symbol · search_sandbox</text>
+</svg>
