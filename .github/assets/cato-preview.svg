@@ -35,7 +35,7 @@
   <circle cx="26" cy="23" r="6.5" fill="#ef4444"/>
   <circle cx="46" cy="23" r="6.5" fill="#f59e0b"/>
   <circle cx="66" cy="23" r="6.5" fill="#10b981"/>
-  <text x="560" y="28" text-anchor="middle" class="title">Claude Code — CATO: Claude Adaptive Token Optimizer (v1.4.2)</text>
+  <text x="560" y="28" text-anchor="middle" class="title">Claude Code — CATO: Claude Adaptive Token Optimizer (v1.4.3)</text>
 
   <!-- Vertical Divider between /cato and /cato-doctor -->
   <line x1="572" y1="42" x2="572" y2="608" stroke="#1e293b" stroke-width="1.5"/>

@@ -1,7 +1,7 @@
 {
   "name": "cato",
   "displayName": "CATO: Claude Adaptive Token Optimizer",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Cuts Claude Code's token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation, with Serena, Graphify, ast-grep and GitHub MCP integration. Speaks English, Portuguese and Spanish.",
   "author": {
     "name": "Marcus Maciel",

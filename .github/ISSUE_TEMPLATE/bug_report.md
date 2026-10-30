@@ -17,4 +17,4 @@ Paste the output of `/cato-doctor` here (no private project paths are included):
 ## Environment / Ambiente
 - **OS:** (e.g. Windows 11, macOS, Linux)
 - **Claude Code version:** (e.g. `2.1.309`)
-- **CATO version:** (e.g. `1.4.2`)
+- **CATO version:** (e.g. `1.4.3`)
