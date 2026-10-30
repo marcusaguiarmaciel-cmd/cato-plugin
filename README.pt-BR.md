@@ -53,9 +53,10 @@ O que só o modelo lê (negações, rodapés de compressão, descrições de fer
 | `/cato [dias]` | Custo real por período, cache misses por causa, custo por tamanho de contexto, tokens economizados por intervenção (incluindo o RTK via `rtk gain`) e recomendações. Padrão: 30 dias |
 | `/cato-import` | Soma as sessões anteriores à instalação, lidas dos transcripts, sem contar nada duas vezes |
 | `/cato-doctor` | Diagnóstico só de leitura: idioma, resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
+| `/cato-share [dias]` | Quadro compacto em 5 linhas (custo, cache misses e tokens economizados, sem nomes de projetos nem caminhos) pronto para copiar e compartilhar |
 | `/cato-experimental [ligar\|desligar\|padrão]` | Mostra ou liga e desliga os recursos experimentais |
 
-`/cato importar`, `/cato doctor` e `/cato experimental …` também funcionam, assim como as palavras em inglês e espanhol (`on`, `off`, `default`, `activar`, `desactivar`, `predeterminado`).
+`/cato importar`, `/cato doctor`, `/cato compartilhar` e `/cato experimental …` também funcionam, assim como as palavras em inglês e espanhol (`share`, `compartir`, `on`, `off`, `default`, `activar`, `desactivar`, `predeterminado`).
 
 ## O que faz
 

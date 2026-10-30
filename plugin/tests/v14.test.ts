@@ -189,3 +189,35 @@ test('custo fixo: descrições e lembretes são medidos sem alterar o que vai pa
   expect(text).toContain('Ferramentas de mcp:x: 1 (0 atrás do ToolSearch), ≈ 1 mil tokens')
   expect(text).toContain('Lembrete "todo_reminder": 1×, ≈ 100 tokens')
 })
+
+test('share: /cato compartilhar e /cato-share geram quadro compacto sem caminhos locais e respeitam a largura', PT, async ($, on) => {
+  mock.store(on, {
+    ledger: {
+      days: {
+        '2026-10-29': {
+          calls: 10, cost: 12.5, read: 1_000_000, write: 200_000, output: 20_000, ctxSum: 2_500_000, maxCtx: 400_000,
+          missIdle: 2, missIdleCost: 3.2, missModel: 1, missModelCost: 1.6, missOther: 0, missOtherCost: 0,
+          rebuilds: 0, rebuildCost: 0, unpriced: 0, subCalls: 2, subCost: 0.5, subMisses: 0, subMissCost: 0,
+          band0: 1, band1: 5, band2: 6.5, band3: 0, compressions: 5, compressedTokens: 2_000_000, blockedReads: 3,
+          guardHolds: 2, readGuardDenies: 0, readGuardBypass: 0, blockedTokens: 50_000, readGuardTokens: 0,
+          sandboxed: 1, sandboxTokens: 20_000, masks: 0, maskedTokens: 0, warms: 0, warmCost: 0, warmSaved: 0,
+        },
+      },
+    },
+  })
+  mock.clock(on, { now: Date.UTC(2026, 9, 29, 15) })
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const card = String(((await $.command.run({ command: 'cato', args: 'compartilhar 7', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 90 } })) as { text?: string }).text)
+  expect(card).toContain('╭─')
+  expect(card).toContain('CATO Auditoria de Tokens e Cache — últimos 7 dias')
+  expect(card).toContain('12 chamadas')
+  expect(card).toContain('Cache misses: 3×')
+  expect(card).toContain('2 prompts segurados')
+  expect(card).toContain('github.com/marcusaguiarmaciel-cmd/cato-plugin')
+
+  const narrow = String(((await $.command.run({ command: 'cato-share', args: '7', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 60 } })) as { text?: string }).text)
+  expect(narrow.split('\n').every(line => [...line].length <= 60)).toBe(true)
+
+  const report = String(((await $.command.run({ command: 'cato', args: '7', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })) as { text?: string }).text)
+  expect(report).toContain('♥ O CATO já evitou ≈ US$ 16,56 em escritas de cache')
+})

@@ -918,8 +918,59 @@ async function costReport($: EngineInterface, days: number, width = 100): Promis
   out.push('')
   if (!period.calls && !period.subCalls) out.push(...wrap(m.noCalls, width))
   out.push(...wrap(history?.calls ? m.imported(f.int(history.calls), f.date(dayKey(history.first)), f.date(dayKey(history.last))) : m.importHint, width))
-  out.push(m.periodHint)
+  out.push(`${m.periodHint} · ${m.shareHint}`)
+  const totalSavedUsd = (Math.max(0, savedTokens) * entryPrice) / 1e6 + period.warmSaved
+  if (totalSavedUsd >= 10) out.push(...wrap(m.sponsorLine(f.money(totalSavedUsd)), width))
   return out.join('\n')
+}
+
+async function shareCard($: EngineInterface, days: number, width = 100): Promise<string> {
+  const ledger = await loadLedger($)
+  const history = await loadHistory($)
+  const now = await $.clock.now()
+  const keys = lastDayKeys(now, days)
+  const period = emptyDay()
+  for (const key of keys) {
+    addDay(period, ledger.days[key])
+    addDay(period, history?.days[key])
+  }
+  const rtk = await rtkSavings($, keys)
+  const price = priceFor(lastModel) ?? priceFor('opus')!
+  const entryPrice = options.cacheTtlMinutes >= 60 ? price.write1h : price.write5m
+  const savedTokens =
+    (rtk?.saved ?? 0) +
+    period.compressedTokens +
+    period.sandboxTokens +
+    period.blockedTokens +
+    period.readGuardTokens +
+    period.maskedTokens
+  const savedUsd = (Math.max(0, savedTokens) * entryPrice) / 1e6 + period.warmSaved
+  const totalCost = period.cost + period.subCost
+  const totalCalls = period.calls + period.subCalls
+  const avgCtx = period.calls ? period.ctxSum / period.calls : 0
+  const misses = period.missIdle + period.missModel + period.missOther + period.subMisses
+  const missCost = period.missIdleCost + period.missModelCost + period.missOtherCost + period.subMissCost
+  const m = t().share
+  const f = fmt()
+  const rows = [
+    m.title(t().days(days)),
+    m.usage(f.money(totalCost), f.int(totalCalls), f.tokens(avgCtx), f.tokens(period.maxCtx)),
+    m.misses(f.int(misses), f.money(missCost), f.int(period.missIdle), f.int(period.missModel)),
+    m.saved(f.tokens(Math.max(0, savedTokens)), f.money(savedUsd), f.int(period.guardHolds)),
+    'github.com/marcusaguiarmaciel-cmd/cato-plugin',
+  ]
+  const inner = Math.min(Math.max(40, width - 4), Math.max(...rows.map(r => [...r].length)))
+  const pad = (s: string) => {
+    const chars = [...s]
+    return chars.length > inner ? chars.slice(0, inner - 1).join('') + '…' : s + ' '.repeat(inner - chars.length)
+  }
+  return [
+    `╭─${'─'.repeat(inner)}─╮`,
+    ...rows.map(r => `│ ${pad(r)} │`),
+    `╰─${'─'.repeat(inner)}─╯`,
+    '',
+    ...wrap(m.hint, width),
+  ].join('\n')
 }
 
 // -------------------------------------------------------------------------------------------------------
@@ -1955,6 +2006,7 @@ export const register: Register = (on, rawOptions) => {
     // O menu não mostra argumentos: cada subcomando também tem um comando próprio
     await $.command.register({ name: 'cato-doctor', description: c.doctor })
     await $.command.register({ name: 'cato-import', description: c.import })
+    await $.command.register({ name: 'cato-share', description: c.share, argumentHint: c.shareHint })
     await $.command.register({ name: 'cato-experimental', description: c.experimental, argumentHint: c.experimentalHint })
     await cleanupOldFiles($)
     return next(e)
@@ -1975,6 +2027,8 @@ export const register: Register = (on, rawOptions) => {
     const width = columns(e)
     if (['import', 'importar'].includes(arg)) return { text: await importHistory($, () => next.budget.remainingMs, width) }
     if (arg === 'doctor') return { text: await doctor($, width) }
+    const share = arg.match(/^(?:share|compartilhar|compartir)(?:\s+(.+))?$/)
+    if (share) return { text: await shareCard($, days(share[1]), width) }
     const experimental = arg.match(/^experimenta(?:l|is|les)(?:\s+(.+))?$/)
     if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '', width) }
     return { text: await costReport($, days(arg), width) }
@@ -1988,6 +2042,10 @@ export const register: Register = (on, rawOptions) => {
     await detectLanguage($)
     return { text: await importHistory($, () => next.budget.remainingMs, columns(e)) }
   }).catch(($, e, next) => next(e))
+  on('command.run', { command: 'cato-share' }, async ($, e) => {
+    await detectLanguage($)
+    return { text: await shareCard($, days(e.args), columns(e)) }
+  })
   on('command.run', { command: 'cato-experimental' }, async ($, e) => {
     await detectLanguage($)
     return { text: await toggleExperimental($, String(e.args ?? ''), columns(e)) }

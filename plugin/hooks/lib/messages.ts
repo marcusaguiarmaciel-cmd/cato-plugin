@@ -11,9 +11,11 @@ const en = {
 
   commands: {
     cato: 'CATO: real cost, cache misses and what would save the most (/cato <days> for another period)',
-    catoHint: '[days | import | doctor | experimental [on|off|default]]',
+    catoHint: '[days | import | doctor | share | experimental [on|off|default]]',
     doctor: 'CATO: diagnose what spends context on this machine (changes nothing)',
     import: 'CATO: import the cost of sessions from before CATO was installed',
+    share: 'CATO: compact 5-line cost and savings card ready to copy and share',
+    shareHint: '[days]',
     experimental: 'CATO: show, turn on or turn off the experimental features (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[on | off | default]',
   },
@@ -68,6 +70,16 @@ const en = {
     importHint: 'To include sessions from before CATO was installed: /cato-import',
     noCalls: 'No calls recorded in this period yet.',
     periodHint: 'Another period: /cato <days> (1–90).',
+    shareHint: 'Compact card to share: /cato share',
+    sponsorLine: (saved: string) => `♥ CATO already avoided ≈ ${saved} in cache writes. Support the project: github.com/sponsors/marcusaguiarmaciel-cmd`,
+  },
+
+  share: {
+    title: (days: string) => `CATO Token & Cache Audit — last ${days}`,
+    usage: (cost: string, calls: string, avg: string, max: string) => `Spend: ${cost} · ${calls} calls · avg ctx ${avg} (max ${max})`,
+    misses: (total: string, cost: string, idle: string, model: string) => `Cache misses: ${total}× (${cost}) · ${idle}× idle · ${model}× model switch`,
+    saved: (tokens: string, cost: string, held: string) => `Saved by CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts held`,
+    hint: 'Copy the box above to share your audit (no project names or file paths are included).',
   },
 
   doctor: {
@@ -198,9 +210,11 @@ const pt: Messages = {
 
   commands: {
     cato: 'CATO: custo real, cache misses e o que mais economiza (/cato <dias> para outro período)',
-    catoHint: '[dias | import | doctor | experimental [on|off|default]]',
+    catoHint: '[dias | import | doctor | compartilhar | experimental [ligar|desligar|padrão]]',
     doctor: 'CATO: diagnóstico do que gasta contexto nesta máquina (não altera nada)',
     import: 'CATO: importa o custo das sessões anteriores à instalação',
+    share: 'CATO: resumo compacto em 5 linhas pronto para copiar e compartilhar',
+    shareHint: '[dias]',
     experimental: 'CATO: mostra, liga ou desliga os recursos experimentais (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[ligar | desligar | padrão]',
   },
@@ -254,6 +268,16 @@ const pt: Messages = {
     importHint: 'Para incluir as sessões anteriores à instalação: /cato-import',
     noCalls: 'Ainda não há chamadas registradas no período.',
     periodHint: 'Outro período: /cato <dias> (1–90).',
+    shareHint: 'Resumo para compartilhar: /cato compartilhar',
+    sponsorLine: saved => `♥ O CATO já evitou ≈ ${saved} em escritas de cache. Apoie o projeto: github.com/sponsors/marcusaguiarmaciel-cmd`,
+  },
+
+  share: {
+    title: days => `CATO Auditoria de Tokens e Cache — últimos ${days}`,
+    usage: (cost, calls, avg, max) => `Custo: ${cost} · ${calls} chamadas · ctx médio ${avg} (máx. ${max})`,
+    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× troca de modelo`,
+    saved: (tokens, cost, held) => `Economia CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts segurados`,
+    hint: 'Copie o quadro acima para compartilhar sua auditoria (nenhum nome de projeto ou caminho de arquivo é incluído).',
   },
 
   doctor: {
@@ -380,9 +404,11 @@ const es: Messages = {
 
   commands: {
     cato: 'CATO: costo real, cache misses y lo que más ahorra (/cato <días> para otro período)',
-    catoHint: '[días | import | doctor | experimental [on|off|default]]',
+    catoHint: '[días | import | doctor | compartir | experimental [activar|desactivar|predeterminado]]',
     doctor: 'CATO: diagnóstico de lo que gasta contexto en esta máquina (no cambia nada)',
     import: 'CATO: importa el costo de las sesiones anteriores a la instalación',
+    share: 'CATO: resumen compacto en 5 líneas listo para copiar y compartir',
+    shareHint: '[días]',
     experimental: 'CATO: muestra, activa o desactiva las funciones experimentales (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[activar | desactivar | predeterminado]',
   },
@@ -436,6 +462,16 @@ const es: Messages = {
     importHint: 'Para incluir las sesiones anteriores a la instalación: /cato-import',
     noCalls: 'Todavía no hay llamadas registradas en el período.',
     periodHint: 'Otro período: /cato <días> (1–90).',
+    shareHint: 'Resumen para compartir: /cato compartir',
+    sponsorLine: saved => `♥ CATO ya evitó ≈ ${saved} en escrituras de caché. Apoya el proyecto: github.com/sponsors/marcusaguiarmaciel-cmd`,
+  },
+
+  share: {
+    title: days => `CATO Auditoría de Tokens y Caché — últimos ${days}`,
+    usage: (cost, calls, avg, max) => `Costo: ${cost} · ${calls} llamadas · ctx medio ${avg} (máx. ${max})`,
+    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× cambio de modelo`,
+    saved: (tokens, cost, held) => `Ahorro CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts retenidos`,
+    hint: 'Copia el cuadro de arriba para compartir tu auditoría (no incluye nombres de proyectos ni rutas de archivos).',
   },
 
   doctor: {

@@ -53,9 +53,10 @@ What only the model reads (denials, compression footers, tool descriptions, the 
 | `/cato [days]` | Real cost per period, cache misses by cause, cost by context size, tokens saved per intervention (including RTK via `rtk gain`) and recommendations. Default: 30 days |
 | `/cato-import` | Adds sessions from before the install, read from the transcripts, without counting anything twice |
 | `/cato-doctor` | Read-only diagnostics: language, leftovers of the Python version, double auto-compaction, integrations, `CLAUDE.md` over 200 lines, too many MCP servers, `opusplan` and mismatched TTLs |
+| `/cato-share [days]` | Compact 5-line audit card (spend, cache misses and tokens saved, with no project names or paths) ready to copy and share |
 | `/cato-experimental [on\|off\|default]` | Shows or toggles the experimental features |
 
-`/cato import`, `/cato doctor` and `/cato experimental …` also work. Portuguese and Spanish words are accepted too (`ligar`, `desligar`, `padrão`, `activar`, `desactivar`, `predeterminado`).
+`/cato import`, `/cato doctor`, `/cato share` and `/cato experimental …` also work. Portuguese and Spanish words are accepted too (`compartilhar`, `compartir`, `ligar`, `desligar`, `padrão`, `activar`, `desactivar`, `predeterminado`).
 
 ## What it does
 
