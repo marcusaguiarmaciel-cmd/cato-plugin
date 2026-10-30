@@ -2,7 +2,7 @@
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
 [![Apoiar o CATO](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/marcusaguiarmaciel-cmd)
-[![Release](https://img.shields.io/github/v/release/marcusaguiarmaciel-cmd/cato-plugin?color=22c55e&label=release)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
+[![Release](https://img.shields.io/badge/release-v1.4.0-22c55e)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.290-38bdf8)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin)
 [![Tests](https://img.shields.io/badge/testes-71_passando-4ade80)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/tree/main/plugin/tests)
 
@@ -10,17 +10,30 @@
 
 Plugin para o Claude Code que reduz o custo de tokens com controle de contexto e de cache de prompts, compactação automática, compressão de saídas volumosas e navegação de código eficiente. Roda inteiramente dentro do Claude Code, sem Python e sem processos externos por hook, e se integra a Serena, Graphify, ast-grep e GitHub MCP.
 
+> **100% Local e Offline:** Zero chamadas de rede, zero telemetria e zero dependências externas.
+
 <p align="center">
   <img src=".github/assets/cato-preview-pt.svg" alt="Prévia do terminal do CATO com /cato e /cato-doctor" width="100%" />
 </p>
 
-## Instalação
+## Início Rápido (Auditoria de Custo e Cache em 30 Segundos)
 
-Requer Claude Code **2.1.290 ou mais novo**.
+Requer Claude Code **2.1.290 ou mais novo** (`claude update`).
 
-```
-/plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
-```
+1. **Instale o CATO:**
+   ```
+   /plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
+   ```
+2. **Audite suas sessões passadas (instantâneo, somente leitura):**
+   ```
+   /cato-import
+   /cato
+   ```
+   Lê seus transcripts `.jsonl` locais existentes e mostra seu custo real dos últimos 30 dias, *cache misses* por causa (expiração de TTL em pausas, trocas de modelo, subagentes) e o gasto por faixa de contexto.
+3. **Verifique vazamentos de tokens na sua configuração:**
+   ```
+   /cato-doctor
+   ```
 
 ## Idioma
 
@@ -100,4 +113,4 @@ Se o CATO economiza tokens e custos de API no seu dia a dia, considere [apoiar o
 
 ## Licença
 
-[MIT com Commons Clause (Não Comercial)](LICENSE) — Livre para usar, modificar e publicar versões próprias sem fins lucrativos; a venda ou comercialização é proibida sem autorização.
+[MIT com Commons Clause (Não Comercial)](LICENSE) — **Livre para uso pessoal, acadêmico e no trabalho diário interno em empresas**, bem como para modificar e publicar versões próprias sem fins lucrativos; a Commons Clause proíbe apenas a venda ou comercialização do próprio CATO como produto ou serviço pago sem autorização.

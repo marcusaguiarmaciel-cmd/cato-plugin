@@ -2,7 +2,7 @@
 
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
 [![Sponsor CATO](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/marcusaguiarmaciel-cmd)
-[![Release](https://img.shields.io/github/v/release/marcusaguiarmaciel-cmd/cato-plugin?color=22c55e&label=release)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
+[![Release](https://img.shields.io/badge/release-v1.4.0-22c55e)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.290-38bdf8)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin)
 [![Tests](https://img.shields.io/badge/tests-71_passing-4ade80)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/tree/main/plugin/tests)
 
@@ -10,17 +10,30 @@
 
 A Claude Code plugin that cuts token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation. It runs entirely inside Claude Code, with no Python and no external process per hook, and integrates with Serena, Graphify, ast-grep and GitHub MCP.
 
+> **100% Local & Offline:** Zero network calls, zero telemetry, and zero external npm dependencies.
+
 <p align="center">
   <img src=".github/assets/cato-preview.svg" alt="CATO /cato and /cato-doctor terminal preview" width="100%" />
 </p>
 
-## Install
+## Quick Start (30-Second Cost & Cache Audit)
 
-Requires Claude Code **2.1.290 or newer**.
+Requires Claude Code **2.1.290 or newer** (`claude update`).
 
-```
-/plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
-```
+1. **Install CATO:**
+   ```
+   /plugin install cato --marketplace marcusaguiarmaciel-cmd/cato-plugin
+   ```
+2. **Audit your past sessions (instant, read-only):**
+   ```
+   /cato-import
+   /cato
+   ```
+   Reads your existing local `.jsonl` transcripts and shows your real 30-day token spend, cache misses by cause (idle TTL expiration, model switches, subagents), and context-band breakdown.
+3. **Check your setup for token leaks:**
+   ```
+   /cato-doctor
+   ```
 
 ## Language
 
@@ -100,4 +113,4 @@ If CATO saves you tokens and API cost, consider [sponsoring the project on GitHu
 
 ## License
 
-[MIT with Commons Clause (Non-Commercial)](LICENSE) — Free to use, modify, and publish non-commercial forks/versions; commercial sale or monetization is prohibited without permission.
+[MIT with Commons Clause (Non-Commercial)](LICENSE) — **Free for personal, academic, and internal company/commercial day-to-day engineering use**, as well as non-commercial forks; the Commons Clause only prohibits selling or monetizing CATO itself as a paid product or managed service without permission.
