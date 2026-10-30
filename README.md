@@ -121,6 +121,8 @@ CATO runs inside Claude Code. **It sends nothing anywhere**: no telemetry, no ne
 | Denies forked subagents (which copy the whole conversation) and asks for a regular subagent instead. It never changes permission modes or approves anything | Agent | `disableForks` |
 | Holds a prompt once when the cache expired and continuing would cost more than the threshold | Your prompt | `guard`, `guardBlockUsd` |
 
+Privacy: [PRIVACY.md](PRIVACY.md).
+
 ## Integrations
 
 All are detected automatically: without the tool installed, nothing changes.

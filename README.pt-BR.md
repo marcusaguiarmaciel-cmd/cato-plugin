@@ -121,6 +121,8 @@ O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: se
 | Nega subagentes em fork (que copiam a conversa inteira) e pede um subagente comum. Nunca muda modos de permissão nem aprova nada | Agent | `disableForks` |
 | Segura um prompt uma vez quando o cache expirou e continuar custaria mais que o limite | Seu prompt | `guard`, `guardBlockUsd` |
 
+Privacidade: [PRIVACY.md](PRIVACY.md) (em inglês).
+
 ## Integrações
 
 Todas são detectadas sozinhas: sem a ferramenta instalada, nada muda.

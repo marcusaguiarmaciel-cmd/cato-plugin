@@ -9,6 +9,7 @@
   },
   "homepage": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
   "repository": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin",
+  "privacyPolicyUrl": "https://github.com/marcusaguiarmaciel-cmd/cato-plugin/blob/main/PRIVACY.md",
   "license": "LicenseRef-MIT-Commons-Clause",
   "keywords": [
     "token-optimization",
