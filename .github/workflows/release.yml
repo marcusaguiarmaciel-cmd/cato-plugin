@@ -1,0 +1,27 @@
+name: Release
+
+# Creates the GitHub release vX.Y.Z when plugin.json's version changes on main
+on:
+  push:
+    branches: [main]
+    paths: [plugin/.claude-plugin/plugin.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(jq -r .version plugin/.claude-plugin/plugin.json)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "$version already released"
+            exit 0
+          fi
+          gh release create "$version" --target "$GITHUB_SHA" --title "$version" --generate-notes
