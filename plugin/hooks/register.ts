@@ -539,7 +539,8 @@ async function detectLanguage($: EngineInterface): Promise<void> {
     const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
     // Precedência do Claude Code: local > projeto > usuário
     for (const path of [`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${cfg}/settings.json`]) {
-      const json = await readJson($, path)
+      const text = await $.fs.read(path).catch(() => null)
+      const json = parseJsonObject(text)
       const value = json?.language
       if (typeof value === 'string' && value.trim() && pick(langFrom(value) ?? 'en', 'claude')) return
     }
@@ -1187,10 +1188,10 @@ async function importHistory($: EngineInterface, remainingMs: () => number, widt
 // -------------------------------------------------------------------------------------------------------
 type Json = Record<string, unknown>
 
-async function readJson($: EngineInterface, path: string): Promise<Json | null> {
+function parseJsonObject(text: unknown): Json | null {
+  if (typeof text !== 'string') return null
   try {
-    const text = await $.fs.read(path)
-    const value = JSON.parse(String(text)) as unknown
+    const value = JSON.parse(text) as unknown
     return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null
   } catch {
     return null
@@ -1226,10 +1227,12 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
   const cfg = await claudeConfigDir($)
   const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
   // Ordem de precedência: usuário < projeto < local (o último que define vence)
-  const userSettings = await readJson($, `${cfg}/settings.json`)
-  const projectSettings = await readJson($, `${cwd}/.claude/settings.json`)
-  const localSettings = await readJson($, `${cwd}/.claude/settings.local.json`)
-  const settings = [userSettings, projectSettings, localSettings].filter((s): s is Json => !!s)
+  const userSettingsText = await $.fs.read(`${cfg}/settings.json`).catch(() => null)
+  const projectSettingsText = await $.fs.read(`${cwd}/.claude/settings.json`).catch(() => null)
+  const localSettingsText = await $.fs.read(`${cwd}/.claude/settings.local.json`).catch(() => null)
+  const settings = [userSettingsText, projectSettingsText, localSettingsText]
+    .map(parseJsonObject)
+    .filter((s): s is Json => !!s)
   const setting = (key: string): unknown => settings.reduce<unknown>((v, s) => (key in s ? s[key] : v), undefined)
   // Variável de ambiente: a do processo ou a do bloco "env" das settings ($.env.get só aceita nome literal)
   const envOr = (name: string, fromProcess: string | undefined): string => {
@@ -1237,11 +1240,16 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
     const fromSettings = settings.reduce<unknown>((v, s) => ((s.env as Json | undefined)?.[name] ?? v), undefined)
     return typeof fromSettings === 'string' ? fromSettings : ''
   }
-  let claudeJson = await readJson($, `${cfg}/.claude.json`)
-  if (!claudeJson) claudeJson = await readJson($, `${home}/.claude.json`)
+  const configClaudeJsonText = await $.fs.read(`${cfg}/.claude.json`).catch(() => null)
+  let claudeJson = parseJsonObject(configClaudeJsonText)
+  if (!claudeJson) {
+    const homeClaudeJsonText = await $.fs.read(`${home}/.claude.json`).catch(() => null)
+    claudeJson = parseJsonObject(homeClaudeJsonText)
+  }
   const projects = (claudeJson?.projects ?? {}) as Record<string, Json>
   const projectEntry = projects[cwd] ?? projects[cwd.replace(/\//g, '\\')] ?? null
-  const mcpJson = await readJson($, `${cwd}/.mcp.json`)
+  const mcpJsonText = await $.fs.read(`${cwd}/.mcp.json`).catch(() => null)
+  const mcpJson = parseJsonObject(mcpJsonText)
   const mcpServers = [
     ...objectKeys(claudeJson?.mcpServers),
     ...objectKeys(projectEntry?.mcpServers),
