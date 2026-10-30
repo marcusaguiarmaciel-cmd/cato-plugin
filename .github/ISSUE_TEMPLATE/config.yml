@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📊 Share your /cato-share Token & Cache Audit
+    url: https://github.com/marcusaguiarmaciel-cmd/cato-plugin/issues/1
+    about: Post your 30-day token & prompt-cache audit in our community showcase thread!
+  - name: ❤️ Sponsor CATO on GitHub Sponsors
+    url: https://github.com/sponsors/marcusaguiarmaciel-cmd
+    about: Support ongoing development of CATO
