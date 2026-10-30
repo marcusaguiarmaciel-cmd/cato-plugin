@@ -415,7 +415,8 @@ let toolsDirty = false
 const pendingAttachments: Record<string, FixedRow> = {}
 
 async function loadFixed($: EngineInterface): Promise<Fixed> {
-  const raw = (await $.store.get(FIXED_KEY).catch(() => undefined)) as Partial<Fixed> | undefined
+  const stored = await $.store.get(FIXED_KEY).catch(() => undefined)
+  const raw = stored as Partial<Fixed> | undefined
   return { tools: raw?.tools ?? {}, attachments: raw?.attachments ?? {} }
 }
 
@@ -538,7 +539,8 @@ async function detectLanguage($: EngineInterface): Promise<void> {
     const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
     // Precedência do Claude Code: local > projeto > usuário
     for (const path of [`${cwd}/.claude/settings.local.json`, `${cwd}/.claude/settings.json`, `${cfg}/settings.json`]) {
-      const value = (await readJson($, path))?.language
+      const json = await readJson($, path)
+      const value = json?.language
       if (typeof value === 'string' && value.trim() && pick(langFrom(value) ?? 'en', 'claude')) return
     }
   } catch {
@@ -609,7 +611,8 @@ async function syntaxProblem($: EngineInterface, path: string): Promise<string |
   const lower = path.toLowerCase()
   if (lower.endsWith('.json')) {
     try {
-      JSON.parse((await $.fs.read(path)) as string)
+      const text = await $.fs.read(path)
+      JSON.parse(String(text))
       return null
     } catch (error) {
       return `[CATO] The JSON in ${path} is now invalid: ${(error as Error).message}. Fix it with Edit.`
@@ -682,7 +685,9 @@ async function loadGraph($: EngineInterface): Promise<Graph | null> {
   try {
     const { mtimeMs } = await $.fs.stat(GRAPHIFY_JSON)
     if (graphCache?.mtimeMs === mtimeMs) return graphCache.graph
-    const graph = parseGraph((await $.fs.read(GRAPHIFY_JSON)) as string, await $.session.cwd())
+    const text = await $.fs.read(GRAPHIFY_JSON)
+    const cwd = await $.session.cwd()
+    const graph = parseGraph(String(text), cwd)
     graphCache = { mtimeMs, graph }
     return graph
   } catch {
@@ -696,8 +701,10 @@ async function repoMap($: EngineInterface, focus: string | undefined, budget: nu
   for (let i = 0; i < paths.length; i += 25) {
     const batch = await Promise.all(paths.slice(i, i + 25).map(async path => {
       try {
-        if ((await $.fs.stat(path)).size > 200_000) return null
-        return [path, (await $.fs.read(path)) as string] as const
+        const stat = await $.fs.stat(path)
+        if (stat.size > 200_000) return null
+        const text = await $.fs.read(path)
+        return [path, String(text)] as const
       } catch {
         // arquivo sumiu ou é ilegível: segue
         return null
@@ -764,16 +771,19 @@ async function structuralSearch($: EngineInterface, input: { pattern: string; la
 
 async function readSymbol($: EngineInterface, filePath: string, symbol: string): Promise<string> {
   const path = await readableProjectFile($, filePath)
-  const found = extractSymbol(path, (await $.fs.read(path)) as string, symbol)
+  const text = await $.fs.read(path)
+  const found = extractSymbol(path, String(text), symbol)
   if (!found) return `Symbol '${symbol}' not found in ${filePath}.`
   return `# [CATO Symbol Extract: ${symbol} in ${filePath} (L${found.start}-L${found.end})]\n${found.text}`
 }
 
 async function searchSandbox($: EngineInterface, id: string, query: string): Promise<string> {
   const home = await homeDir($)
-  const chunks: SandboxChunk[] = id.startsWith('sbx_')
-    ? (JSON.parse((await $.fs.read(`${home}/.cato/sandbox/${id}.json`)) as string) as { chunks: SandboxChunk[] }).chunks
-    : chunkLines((await $.fs.read(`${home}/.cato/logs/${id}.log`)) as string)
+  const isSandbox = id.startsWith('sbx_')
+  const text = await $.fs.read(isSandbox ? `${home}/.cato/sandbox/${id}.json` : `${home}/.cato/logs/${id}.log`)
+  const chunks: SandboxChunk[] = isSandbox
+    ? (JSON.parse(String(text)) as { chunks: SandboxChunk[] }).chunks
+    : chunkLines(String(text))
   const hits = bm25Search(chunks, query)
   return hits.length ? hits.map(h => `=== [${h.title}] ===\n${h.content}`).join('\n\n') : `No results for '${query}' in ${id}.`
 }
@@ -1078,7 +1088,8 @@ async function readTranscript($: EngineInterface, file: TranscriptFile, extracto
     return parseExtract(r.stdout)
   }
   if (file.size > FS_READ_LIMIT) return 'over 4 MiB and no awk/PowerShell to extract it'
-  return parseJsonlText((await $.fs.read(file.path)) as string)
+  const text = await $.fs.read(file.path)
+  return parseJsonlText(String(text))
 }
 
 async function importHistory($: EngineInterface, remainingMs: () => number, width = 100): Promise<string> {
@@ -1178,7 +1189,8 @@ type Json = Record<string, unknown>
 
 async function readJson($: EngineInterface, path: string): Promise<Json | null> {
   try {
-    const value = JSON.parse((await $.fs.read(path)) as string) as unknown
+    const text = await $.fs.read(path)
+    const value = JSON.parse(String(text)) as unknown
     return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : null
   } catch {
     return null
@@ -1214,11 +1226,10 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
   const cfg = await claudeConfigDir($)
   const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
   // Ordem de precedência: usuário < projeto < local (o último que define vence)
-  const settings = (await Promise.all([
-    readJson($, `${cfg}/settings.json`),
-    readJson($, `${cwd}/.claude/settings.json`),
-    readJson($, `${cwd}/.claude/settings.local.json`),
-  ])).filter((s): s is Json => !!s)
+  const userSettings = await readJson($, `${cfg}/settings.json`)
+  const projectSettings = await readJson($, `${cwd}/.claude/settings.json`)
+  const localSettings = await readJson($, `${cwd}/.claude/settings.local.json`)
+  const settings = [userSettings, projectSettings, localSettings].filter((s): s is Json => !!s)
   const setting = (key: string): unknown => settings.reduce<unknown>((v, s) => (key in s ? s[key] : v), undefined)
   // Variável de ambiente: a do processo ou a do bloco "env" das settings ($.env.get só aceita nome literal)
   const envOr = (name: string, fromProcess: string | undefined): string => {
@@ -1226,13 +1237,15 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
     const fromSettings = settings.reduce<unknown>((v, s) => ((s.env as Json | undefined)?.[name] ?? v), undefined)
     return typeof fromSettings === 'string' ? fromSettings : ''
   }
-  const claudeJson = (await readJson($, `${cfg}/.claude.json`)) ?? (await readJson($, `${home}/.claude.json`))
+  let claudeJson = await readJson($, `${cfg}/.claude.json`)
+  if (!claudeJson) claudeJson = await readJson($, `${home}/.claude.json`)
   const projects = (claudeJson?.projects ?? {}) as Record<string, Json>
   const projectEntry = projects[cwd] ?? projects[cwd.replace(/\//g, '\\')] ?? null
+  const mcpJson = await readJson($, `${cwd}/.mcp.json`)
   const mcpServers = [
     ...objectKeys(claudeJson?.mcpServers),
     ...objectKeys(projectEntry?.mcpServers),
-    ...objectKeys((await readJson($, `${cwd}/.mcp.json`))?.mcpServers),
+    ...objectKeys(mcpJson?.mcpServers),
   ]
   const plugins = settings.flatMap(s => objectKeys(s.enabledPlugins))
 
@@ -1390,10 +1403,7 @@ async function cleanupOldFiles($: EngineInterface): Promise<void> {
         .map(entry => `${dir}/${entry.name}`)
       for (let i = 0; i < old.length; i += 50) {
         const batch = old.slice(i, i + 50)
-        const r = await $.process.run(['rm', '-f', ...batch], { timeoutMs: 5000 }).catch(() => null)
-        if (!r || r.exitCode !== 0) {
-          await $.process.run(['cmd', '/c', 'del', '/q', ...batch.map(p => p.replace(/\//g, '\\'))], { timeoutMs: 5000 }).catch(() => null)
-        }
+        await $.process.run(['rm', '-f', ...batch], { timeoutMs: 5000 }).catch(() => null)
       }
     }
   } catch {
@@ -1716,7 +1726,8 @@ export const register: Register = (on, rawOptions) => {
       }
       const size = (await $.fs.stat(path).catch(() => null))?.size ?? 0
       if (size < READ_GUARD_BYTES || size > FS_READ_LIMIT) return next(e)
-      const outline = skeleton(path, (await $.fs.read(path)) as string, 120)
+      const text = await $.fs.read(path)
+      const outline = skeleton(path, String(text), 120)
       if (!outline) return next(e)
       acks.add(key)
       const full = readTokens(size)

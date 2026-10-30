@@ -88,6 +88,39 @@ As opções ficam no `/plugin`, na configuração do CATO.
 - Trocas de fast mode e de effort (fora dos modelos 5.5) também invalidam o cache, mas a API de mods não as expõe: aparecem como "outras".
 - O import só conta chamadas anteriores ao primeiro dia registrado ao vivo; a parte desse dia anterior à instalação fica de fora.
 
+## O que o CATO faz na sua máquina
+
+O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: sem telemetria, sem chamadas de rede próprias e sem dependências npm externas. Tudo o que ele lê fica na sua máquina.
+
+**O que ele lê.** As transcrições das sessões em `~/.claude/projects` (para `/cato` e `/cato-import`). No `/cato-doctor`: `settings.json`, `settings.local.json`, `.mcp.json` e `~/.claude.json`. Do `~/.claude.json` ele só pega os nomes dos servidores MCP e dos projetos configurados, para contá-los; nada é guardado nem enviado, incluindo dados de conta ou credenciais desse arquivo. Arquivos com cara de segredo (`.env`, `*.pem`, `*.key`, `id_rsa`…) nunca são lidos pelas ferramentas do CATO.
+
+**O que ele escreve.** Só dentro de `~/.cato/logs` (logs brutos das saídas de shell comprimidas) e `~/.cato/sandbox` (respostas MCP grandes), além do próprio store dentro do Claude Code. Os arquivos ali são apagados após 14 dias. Ele nunca escreve settings, arquivos de build, `CLAUDE.md` nem nenhum arquivo do seu projeto.
+
+**Programas que ele roda.** Sempre pelo nome, com argumentos fixos, nunca por um shell:
+
+| Programa | Por quê |
+|---|---|
+| `git` | `check-ignore` (a pasta `node_modules`/`build` é ignorada?), `diff --stat` depois da compactação, `--exec-path` (para achar o awk do Git for Windows) |
+| `rm` | Apaga os arquivos do próprio CATO com mais de 14 dias em `~/.cato` (no Windows sem `rm`, eles ficam; apague a pasta à mão se quiser) |
+| `awk`, ou `powershell` sem awk | Só no `/cato-import`: extrai as linhas de uso das transcrições acima de 4 MiB com um script fixo |
+| `python` / `python3` / `py` | Só se instalado e com `pythonChecks` ligado: `-m py_compile` no `.py` recém-editado |
+| `ast-grep` | Só se instalado: a ferramenta `structural_search` e o `/cato-doctor` |
+| `rtk` | Só se instalado: `rtk gain`, para mostrar a economia dele no `/cato` |
+
+**A única chamada ao modelo.** O `warmCache` (experimental, **desligado por padrão**) faz uma chamada mínima ao próprio modelo da sessão pouco antes de o cache expirar. Ela passa pelo Claude Code como qualquer turno, e o `/cato` mostra quanto custou.
+
+**Onde ele muda o comportamento do Claude Code.** Cada item tem uma opção em `/plugin` para desligar:
+
+| O quê | Ferramentas | Opção |
+|---|---|---|
+| Troca a saída por uma versão comprimida; a saída completa fica em `~/.cato/logs` e pode ser buscada pelo ID `#cmd_` | Bash / PowerShell (testes, linters, instalações, builds) | `compressShell` |
+| Transforma respostas grandes em um sandbox pesquisável; repetir a chamada traz tudo | Ferramentas MCP | `sandboxMinTokens`, `sandboxSkip` |
+| Remove campos de JSON que só servem para clientes de API | GitHub MCP | `compactGithub` |
+| Põe um limite de tamanho **só quando o modelo não definiu um** (`max_answer_chars`, `max_results`) | Ferramentas de leitura do Serena, `find_code` do MCP do ast-grep | `serenaMaxAnswerChars`, `astGrepMaxResults` |
+| Nega uma leitura uma vez (repetir libera) | Read / Grep / Glob em lockfiles, bundles minificados e pastas de dependência/build ignoradas pelo git | `blockHeavyReads` |
+| Nega subagentes em fork (que copiam a conversa inteira) e pede um subagente comum. Nunca muda modos de permissão nem aprova nada | Agent | `disableForks` |
+| Segura um prompt uma vez quando o cache expirou e continuar custaria mais que o limite | Seu prompt | `guard`, `guardBlockUsd` |
+
 ## Integrações
 
 Todas são detectadas sozinhas: sem a ferramenta instalada, nada muda.
