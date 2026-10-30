@@ -75,11 +75,12 @@ const en = {
   },
 
   share: {
-    title: (days: string) => `CATO Token & Cache Audit — last ${days}`,
-    usage: (cost: string, calls: string, avg: string, max: string) => `Spend: ${cost} · ${calls} calls · avg ctx ${avg} (max ${max})`,
-    misses: (total: string, cost: string, idle: string, model: string) => `Cache misses: ${total}× (${cost}) · ${idle}× idle · ${model}× model switch`,
+    title: (days: string) => `⚡ CATO · Token & Cache Audit (${days})`,
+    cost: (cost: string, calls: string) => `Real cost: ${cost} across ${calls} calls`,
+    context: (avg: string, max: string) => `Context: avg ${avg} · max ${max}`,
+    misses: (total: string, cost: string, idle: string, model: string) => `Cache misses: ${total}× (${cost}) · ${idle}× idle · ${model}× model`,
     saved: (tokens: string, cost: string, held: string) => `Saved by CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts held`,
-    hint: 'Copy the box above to share your audit (no project names or file paths are included).',
+    hint: 'Ready to copy and share (no project names or paths included).',
   },
 
   doctor: {
@@ -273,11 +274,12 @@ const pt: Messages = {
   },
 
   share: {
-    title: days => `CATO Auditoria de Tokens e Cache — últimos ${days}`,
-    usage: (cost, calls, avg, max) => `Custo: ${cost} · ${calls} chamadas · ctx médio ${avg} (máx. ${max})`,
-    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× troca de modelo`,
+    title: days => `⚡ CATO · Auditoria de Tokens e Cache (${days})`,
+    cost: (cost, calls) => `Custo real: ${cost} em ${calls} chamadas`,
+    context: (avg, max) => `Contexto: médio ${avg} · máx. ${max}`,
+    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× modelo`,
     saved: (tokens, cost, held) => `Economia CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts segurados`,
-    hint: 'Copie o quadro acima para compartilhar sua auditoria (nenhum nome de projeto ou caminho de arquivo é incluído).',
+    hint: 'Pronto para copiar e compartilhar (sem nomes ou caminhos do projeto).',
   },
 
   doctor: {
@@ -467,11 +469,12 @@ const es: Messages = {
   },
 
   share: {
-    title: days => `CATO Auditoría de Tokens y Caché — últimos ${days}`,
-    usage: (cost, calls, avg, max) => `Costo: ${cost} · ${calls} llamadas · ctx medio ${avg} (máx. ${max})`,
-    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× cambio de modelo`,
+    title: days => `⚡ CATO · Auditoría de Tokens y Caché (${days})`,
+    cost: (cost, calls) => `Costo real: ${cost} en ${calls} llamadas`,
+    context: (avg, max) => `Contexto: medio ${avg} · máx. ${max}`,
+    misses: (total, cost, idle, model) => `Cache misses: ${total}× (${cost}) · ${idle}× pausa · ${model}× modelo`,
     saved: (tokens, cost, held) => `Ahorro CATO: ${tokens} tokens (≈ ${cost}) · ${held} prompts retenidos`,
-    hint: 'Copia el cuadro de arriba para compartir tu auditoría (no incluye nombres de proyectos ni rutas de archivos).',
+    hint: 'Listo para copiar y compartir (sin nombres ni rutas del proyecto).',
   },
 
   doctor: {

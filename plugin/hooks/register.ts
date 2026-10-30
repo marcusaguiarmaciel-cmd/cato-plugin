@@ -952,22 +952,17 @@ async function shareCard($: EngineInterface, days: number, width = 100): Promise
   const missCost = period.missIdleCost + period.missModelCost + period.missOtherCost + period.subMissCost
   const m = t().share
   const f = fmt()
-  const rows = [
-    m.title(t().days(days)),
-    m.usage(f.money(totalCost), f.int(totalCalls), f.tokens(avgCtx), f.tokens(period.maxCtx)),
+  const items = [
+    m.cost(f.money(totalCost), f.int(totalCalls)),
+    m.context(f.tokens(avgCtx), f.tokens(period.maxCtx)),
     m.misses(f.int(misses), f.money(missCost), f.int(period.missIdle), f.int(period.missModel)),
     m.saved(f.tokens(Math.max(0, savedTokens)), f.money(savedUsd), f.int(period.guardHolds)),
     'github.com/marcusaguiarmaciel-cmd/cato-plugin',
   ]
-  const inner = Math.min(Math.max(40, width - 4), Math.max(...rows.map(r => [...r].length)))
-  const pad = (s: string) => {
-    const chars = [...s]
-    return chars.length > inner ? chars.slice(0, inner - 1).join('') + '…' : s + ' '.repeat(inner - chars.length)
-  }
   return [
-    `╭─${'─'.repeat(inner)}─╮`,
-    ...rows.map(r => `│ ${pad(r)} │`),
-    `╰─${'─'.repeat(inner)}─╯`,
+    m.title(t().days(days)),
+    '─'.repeat(36),
+    ...items.flatMap(item => bullet('•', item, width)),
     '',
     ...wrap(m.hint, width),
   ].join('\n')
