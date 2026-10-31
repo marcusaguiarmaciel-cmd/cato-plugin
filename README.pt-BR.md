@@ -1,5 +1,6 @@
 # CATO: Claude Adaptive Token Optimizer
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/marcusaguiarmaciel-cmd-cato-plugin-y76n7y)](https://m8ven.ai/mcp/marcusaguiarmaciel-cmd-cato-plugin-y76n7y?s=readme)
 [![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd/badge.svg)](https://hub.xerj.org/contributors/marcusaguiarmaciel-cmd)
 [![Apoiar o CATO](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/marcusaguiarmaciel-cmd)
 [![Release](.github/assets/release.svg)](https://github.com/marcusaguiarmaciel-cmd/cato-plugin/releases)
