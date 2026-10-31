@@ -1921,6 +1921,9 @@ export const register: Register = (on, rawOptions) => {
   // ---------------------------------------------------------------------------------------------------
   // Ferramentas do CATO para o modelo e o comando /cato
   // ---------------------------------------------------------------------------------------------------
+  // Todas as ferramentas do CATO só leem arquivos do projeto e o que o CATO guardou em ~/.cato:
+  // não alteram nada do usuário nem acessam a rede. As quatro dicas vão explícitas em cada uma.
+  const READ_ONLY_LOCAL = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const
   on('session.start', async ($, e, next) => {
     await restoreSnapshot($).catch(() => undefined)
     // O conjunto de ferramentas e agentes vai em toda requisição e faz parte do prefixo do cache: é decidido
@@ -1931,6 +1934,7 @@ export const register: Register = (on, rawOptions) => {
     ])
     await $.tool.register({
       name: 'repo_map',
+      annotations: READ_ONLY_LOCAL,
       description: 'Ranked repo map (PageRank over symbol use): central files with declarations and [L<start>-L<end>]. Use before several Glob/Grep/Read rounds.',
       inputSchema: {
         type: 'object',
@@ -1942,6 +1946,7 @@ export const register: Register = (on, rawOptions) => {
     })
     await $.tool.register({
       name: 'read_symbol',
+      annotations: READ_ONLY_LOCAL,
       description: 'Reads one class/function/method (`Class`, `fn`, `Class.method`) with line numbers instead of the whole file.',
       inputSchema: {
         type: 'object',
@@ -1954,6 +1959,7 @@ export const register: Register = (on, rawOptions) => {
     })
     await $.tool.register({
       name: 'search_sandbox',
+      annotations: READ_ONLY_LOCAL,
       description: 'BM25 search in a response CATO stored (sbx_xxxxxxxx) or a raw command log (cmd_xxxxxxxx).',
       inputSchema: {
         type: 'object',
@@ -1967,6 +1973,7 @@ export const register: Register = (on, rawOptions) => {
     if (hasAstGrep) {
       await $.tool.register({
         name: 'structural_search',
+        annotations: READ_ONLY_LOCAL,
         description: 'ast-grep syntax-tree search (e.g. `console.log($A)`, `def $F($$$):`); compact `file:L<start>-L<end>` hits. Prefer to Grep for code patterns.',
         inputSchema: {
           type: 'object',
@@ -1983,6 +1990,7 @@ export const register: Register = (on, rawOptions) => {
     if (hasGraph) {
       await $.tool.register({
         name: 'graph_query',
+        annotations: READ_ONLY_LOCAL,
         description: 'Queries the Graphify graph without loading it: matching nodes, file:line, community and neighbors.',
         inputSchema: {
           type: 'object',
@@ -1996,6 +2004,7 @@ export const register: Register = (on, rawOptions) => {
     }
     await $.tool.register({
       name: 'cost_report',
+      annotations: READ_ONLY_LOCAL,
       description: "CATO's recorded real cost: periods, cache misses by cause, tokens saved, advice.",
       inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
     })
