@@ -56,15 +56,16 @@ O que só o modelo lê (negações, rodapés de compressão, descrições de fer
 | `/cato-doctor` | Diagnóstico só de leitura: idioma, resto da versão Python, autocompactação em dobro, integrações, `CLAUDE.md` acima de 200 linhas, MCPs demais, `opusplan` e TTLs divergentes |
 | `/cato-share [dias]` | Quadro compacto em 5 linhas (custo, cache misses e tokens economizados, sem nomes de projetos nem caminhos) pronto para copiar e compartilhar |
 | `/cato-experimental [ligar\|desligar\|padrão]` | Mostra ou liga e desliga os recursos experimentais |
+| `/cato-compact [150k\|65%\|desligar\|padrão]` | Mostra ou define quando o CATO compacta a conversa sozinho: numa quantidade de tokens (`150k`, `150000`, `1.5m`) ou numa fatia da janela (`65%`). A escolha vale entre sessões; `padrão` volta ao `autoCompactPercent` do `/plugin` |
 
-`/cato importar`, `/cato doctor`, `/cato compartilhar` e `/cato experimental …` também funcionam, assim como as palavras em inglês e espanhol (`share`, `compartir`, `on`, `off`, `default`, `activar`, `desactivar`, `predeterminado`).
+`/cato importar`, `/cato doctor`, `/cato compartilhar`, `/cato compactar …` e `/cato experimental …` também funcionam, assim como as palavras em inglês e espanhol (`share`, `compartir`, `on`, `off`, `default`, `activar`, `desactivar`, `predeterminado`).
 
 ## O que faz
 
 | Recurso | Como |
 |---|---|
 | Guard de contexto/cache | Avisa por faixa de contexto e segura **uma vez** o prompt quando o cache expirou e reescrevê-lo custaria ≥ `guardBlockUsd` |
-| Autocompactação | Compacta antes do prompt ao passar de `autoCompactPercent` % da janela |
+| Autocompactação | Ao fim de um turno, compacta quando o contexto passa de `autoCompactPercent` % da janela, ou do limite em tokens definido com `/cato-compact 150k` |
 | Instruções de compactação | Quando ninguém deu instruções (autocompactação, `/compact` sem texto), o resumo guarda objetivo, decisões, arquivos alterados, erros abertos e próximos passos, sem saídas brutas (`compactInstructions`; o texto do seu `/compact` prevalece) |
 | Troca de modelo | Com o cache quente, avisa quanto custa reler a conversa no novo modelo (inclui o seletor do app, `opusplan` e skills com outro modelo); nunca segura o prompt |
 | Status de custo | Contexto, custo do próximo turno e minutos até o cache expirar (convive com a sua `statusLine`) |
@@ -121,7 +122,7 @@ O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: se
 | Nega uma leitura uma vez (repetir libera) | Read / Grep / Glob em lockfiles, bundles minificados e pastas de dependência/build ignoradas pelo git | `blockHeavyReads` |
 | Nega subagentes em fork (que copiam a conversa inteira) e pede um subagente comum. Nunca muda modos de permissão nem aprova nada | Agent | `disableForks` |
 | Segura um prompt uma vez quando o cache expirou e continuar custaria mais que o limite | Seu prompt | `guard`, `guardBlockUsd` |
-| Compacta antes do próximo prompt quando o contexto passa da fatia configurada da janela | Seu prompt | `autoCompactPercent` |
+| Compacta a conversa ao fim de um turno quando o contexto passa do limite configurado | Conversa principal | `autoCompactPercent`, `/cato-compact` |
 | Acrescenta um aviso de sintaxe de uma linha quando uma edição deixa um `.json` ou `.py` quebrado (a edição em si não muda) | Edit / Write, ferramentas de edição da Serena | `pythonChecks` (parte em Python) |
 | Acrescenta instruções de compactação padrão quando ninguém deu instruções | `/compact`, autocompactação | `compactInstructions` |
 | Responde às próprias ferramentas (`mcp__cato__cost_report`, `repo_map`, `structural_search`, `graph_query`, `read_symbol`, `search_sandbox`); nenhuma outra ferramenta é respondida no lugar da real | Ferramentas do CATO | — |

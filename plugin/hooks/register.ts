@@ -1392,6 +1392,81 @@ async function toggleExperimental($: EngineInterface, action: string, width = 10
   return out.join('\n')
 }
 
+// -------------------------------------------------------------------------------------------------------
+// Limite da autocompactação definido com /cato-compact: em tokens (150k) ou em % da janela (65%). Fica no
+// $.store, como os experimentais, e vale por cima do autoCompactPercent do /plugin até "padrão" devolvê-lo.
+// -------------------------------------------------------------------------------------------------------
+type AutoCompactOverride = { tokens?: number; percent?: number; off?: boolean }
+type AutoCompactLimit = { tokens?: number; percent?: number; fromOverride: boolean }
+
+const AUTO_COMPACT_KEY = 'autoCompact'
+const AUTO_COMPACT_MIN_TOKENS = 20_000
+let autoCompactOverride: AutoCompactOverride | null = null
+
+async function autoCompactLimit($: EngineInterface): Promise<AutoCompactLimit> {
+  if (!autoCompactOverride) {
+    const raw = await $.store.get(AUTO_COMPACT_KEY).catch(() => null)
+    autoCompactOverride = raw && typeof raw === 'object' ? (raw as AutoCompactOverride) : {}
+  }
+  const o = autoCompactOverride
+  if (o.off) return { fromOverride: true }
+  if (typeof o.tokens === 'number' && o.tokens > 0) return { tokens: o.tokens, fromOverride: true }
+  if (typeof o.percent === 'number' && o.percent > 0) return { percent: o.percent, fromOverride: true }
+  return { percent: options.autoCompactPercent > 0 ? options.autoCompactPercent : undefined, fromOverride: false }
+}
+
+// "150k", "150 k", "150000", "1.5m", "150" (número curto = milhares), "65%"; null quando não entende
+function parseCompactLimit(text: string): AutoCompactOverride | null {
+  const value = text.trim().toLowerCase().replace(/\s+/g, '').replace(/tokens?$/, '')
+  const percent = /^(\d+(?:[.,]\d+)?)%$/.exec(value)
+  if (percent) {
+    const n = Number(percent[1].replace(',', '.'))
+    return n > 0 && n <= 100 ? { percent: n } : null
+  }
+  const amount = /^(\d+(?:[.,]\d+)?)(k|mil|m)?$/.exec(value)
+  if (!amount) return null
+  const n = Number(amount[1].replace(',', '.'))
+  const unit = amount[2] === 'm' ? 1_000_000 : amount[2] || n < 1000 ? 1000 : 1
+  const tokens = Math.round(n * unit)
+  return tokens > 0 ? { tokens } : null
+}
+
+async function setAutoCompact($: EngineInterface, action: string, width = 100): Promise<string> {
+  const m = t().autoCompact
+  const f = fmt()
+  const word = action.trim().toLowerCase()
+  const out = [...heading(m.title)]
+  let changed = false
+  if (word) {
+    await autoCompactLimit($)
+    const parsed = EXPERIMENTAL_WORDS.off.includes(word)
+      ? { off: true }
+      : EXPERIMENTAL_WORDS.reset.includes(word)
+        ? {}
+        : parseCompactLimit(word)
+    if (!parsed) {
+      out.push(...wrap(m.invalid(action.trim()), width))
+    } else if (parsed.tokens !== undefined && parsed.tokens < AUTO_COMPACT_MIN_TOKENS) {
+      out.push(...wrap(m.tooLow(f.tokens(AUTO_COMPACT_MIN_TOKENS)), width))
+    } else {
+      autoCompactOverride = parsed
+      await $.store.set(AUTO_COMPACT_KEY, autoCompactOverride)
+      changed = true
+    }
+  }
+  const limit = await autoCompactLimit($)
+  const source = limit.fromOverride ? m.sourceOverride : m.sourcePlugin
+  const state = limit.tokens
+    ? m.atTokens(f.tokens(limit.tokens), source)
+    : limit.percent
+      ? m.atPercent(f.pct(limit.percent / 100), source)
+      : m.disabled(source)
+  if (out.length > heading(m.title).length) out.push('')
+  out.push(...wrap(state, width))
+  if (!changed) out.push('', ...wrap(m.usage, width))
+  return out.join('\n')
+}
+
 // Sandboxes e logs brutos com mais de 14 dias, uma vez por sessão. $.fs não apaga arquivos: usa o rm
 // (Unix ou Git for Windows) e, sem ele, o del do cmd.
 async function cleanupOldFiles($: EngineInterface): Promise<void> {
@@ -1418,6 +1493,14 @@ export const register: Register = (on, rawOptions) => {
   sandboxSkipRe = undefined
   langDetected = false
   experimentalOverride = null
+  autoCompactOverride = null
+  // Estado da sessão recomeça a cada carga, como num reload; restoreSnapshot traz de volta o que importa
+  lastStepAt = 0
+  lastModel = ''
+  lastCtx = 0
+  compactedAt = 0
+  pendingContext = null
+  acks.clear()
   cancelWarm()
   bands = String(options.contextWarn ?? '')
     .split(',')
@@ -1531,7 +1614,35 @@ export const register: Register = (on, rawOptions) => {
   }).catch(($, e, next) => next(e))
 
   // ---------------------------------------------------------------------------------------------------
-  // Guard de contexto e cache + autocompactação, antes de o prompt ir para a API
+  // Autocompactação (o que CLAUDE_AUTOCOMPACT_PCT_OVERRIDE fazia, agora sem variável de ambiente): ao fim de
+  // um turno da conversa principal, pelo limite em tokens do /cato-compact ou pela % da janela. O motor recusa
+  // compactar de dentro do prompt.submit (o turno seguinte já está segurado), então é aqui, entre turnos.
+  // ---------------------------------------------------------------------------------------------------
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId || e.reason !== 'answer') return result
+    const limit = await autoCompactLimit($)
+    if (!limit.tokens && !limit.percent) return result
+    const usage = await $.session.usage()
+    const ctx = usage.context.tokens ?? lastCtx
+    const pct = usage.context.percent ?? 0
+    const overTokens = !!limit.tokens && ctx >= limit.tokens
+    const overPercent = !limit.tokens && !!limit.percent && pct >= limit.percent
+    if (!overTokens && !overPercent) return result
+    const instructions = compactInstructions()
+    const compactCall = $.session.compact(instructions ? { instructions } : {})
+    const compacted = await compactCall.then(r => !('skip' in r && r.skip)).catch(() => false)
+    if (compacted) {
+      await ensureLanguage($)
+      const f = fmt()
+      const toast = overTokens ? t().toast.compactedTokens(f.tokens(ctx)) : t().toast.compacted(f.pct(pct / 100))
+      $.ui.toast(toast, { timeoutMs: WARN_TOAST_MS })
+    }
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // ---------------------------------------------------------------------------------------------------
+  // Guard de contexto e cache, antes de o prompt ir para a API
   // ---------------------------------------------------------------------------------------------------
   on('prompt.submit', async ($, e, next) => {
     const withPending = () => {
@@ -1556,18 +1667,6 @@ export const register: Register = (on, rawOptions) => {
     const price = priceFor(model)
     await ensureLanguage($)
     const f = fmt()
-
-    // Autocompactação (o que CLAUDE_AUTOCOMPACT_PCT_OVERRIDE fazia, agora sem variável de ambiente)
-    const pct = usage.context.percent ?? 0
-    if (options.autoCompactPercent > 0 && pct >= options.autoCompactPercent) {
-      const instructions = compactInstructions()
-      const compactCall = $.session.compact(instructions ? { instructions } : {})
-      const compacted = await compactCall.then(r => !('skip' in r && r.skip)).catch(() => false)
-      if (compacted) {
-        $.ui.toast(t().toast.compacted(f.pct(pct / 100)), { timeoutMs: WARN_TOAST_MS })
-        return next(withPending())
-      }
-    }
 
     // Cache expirado: o próximo turno reescreve o contexto inteiro
     if (lastStepAt && now - lastStepAt > ttlMs && ctx >= IDLE_MIN_CONTEXT) {
@@ -2021,6 +2120,7 @@ export const register: Register = (on, rawOptions) => {
     await $.command.register({ name: 'cato-import', description: c.import })
     await $.command.register({ name: 'cato-share', description: c.share, argumentHint: c.shareHint })
     await $.command.register({ name: 'cato-experimental', description: c.experimental, argumentHint: c.experimentalHint })
+    await $.command.register({ name: 'cato-compact', description: c.compact, argumentHint: c.compactHint })
     await cleanupOldFiles($)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -2045,6 +2145,8 @@ export const register: Register = (on, rawOptions) => {
     if (share) return { text: await shareCard($, days(share[1]), width) }
     const experimental = arg.match(/^experimenta(?:l|is|les)(?:\s+(.+))?$/)
     if (experimental) return { text: await toggleExperimental($, experimental[1] ?? '', width) }
+    const compact = arg.match(/^(?:compact|compactar)(?:\s+(.+))?$/)
+    if (compact) return { text: await setAutoCompact($, compact[1] ?? '', width) }
     return { text: await costReport($, days(arg), width) }
   }).catch(($, e, next) => next(e))
 
@@ -2064,6 +2166,10 @@ export const register: Register = (on, rawOptions) => {
   on('command.run', { command: 'cato-experimental' }, async ($, e) => {
     await detectLanguage($)
     return { text: await toggleExperimental($, String(e.args ?? ''), columns(e)) }
+  })
+  on('command.run', { command: 'cato-compact' }, async ($, e) => {
+    await detectLanguage($)
+    return { text: await setAutoCompact($, String(e.args ?? ''), columns(e)) }
   })
 
   on('tool.call', { tool: 'mcp__cato__cost_report' }, async ($, e) => {

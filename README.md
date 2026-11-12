@@ -56,15 +56,16 @@ What only the model reads (denials, compression footers, tool descriptions, the 
 | `/cato-doctor` | Read-only diagnostics: language, leftovers of the Python version, double auto-compaction, integrations, `CLAUDE.md` over 200 lines, too many MCP servers, `opusplan` and mismatched TTLs |
 | `/cato-share [days]` | Compact 5-line audit card (spend, cache misses and tokens saved, with no project names or paths) ready to copy and share |
 | `/cato-experimental [on\|off\|default]` | Shows or toggles the experimental features |
+| `/cato-compact [150k\|65%\|off\|default]` | Shows or sets when CATO compacts the conversation on its own: at a token count (`150k`, `150000`, `1.5m`) or at a share of the window (`65%`). The choice is kept across sessions; `default` goes back to `autoCompactPercent` in `/plugin` |
 
-`/cato import`, `/cato doctor`, `/cato share` and `/cato experimental …` also work. Portuguese and Spanish words are accepted too (`compartilhar`, `compartir`, `ligar`, `desligar`, `padrão`, `activar`, `desactivar`, `predeterminado`).
+`/cato import`, `/cato doctor`, `/cato share`, `/cato compact …` and `/cato experimental …` also work. Portuguese and Spanish words are accepted too (`compartilhar`, `compartir`, `ligar`, `desligar`, `padrão`, `activar`, `desactivar`, `predeterminado`).
 
 ## What it does
 
 | Feature | How |
 |---|---|
 | Context/cache guard | Warns per context band and holds the prompt **once** when the cache expired and rewriting it would cost ≥ `guardBlockUsd` |
-| Auto-compaction | Compacts before the prompt once the context passes `autoCompactPercent` % of the window |
+| Auto-compaction | At the end of a turn, compacts once the context passes `autoCompactPercent` % of the window, or the token limit set with `/cato-compact 150k` |
 | Compaction instructions | When nobody gave instructions (auto-compaction, `/compact` with no text), the summary keeps the goal, decisions, changed files, open errors and next steps, without raw output (`compactInstructions`; your `/compact` text wins) |
 | Model switch | With a warm cache, shows what re-reading the conversation in the new model costs (includes the app's picker, `opusplan` and skills with another model); never holds the prompt |
 | Cost status | Context, next turn's cost and minutes until the cache expires (lives alongside your `statusLine`) |
@@ -121,7 +122,7 @@ CATO runs inside Claude Code. **It sends nothing anywhere**: no telemetry, no ne
 | Denies a read once (repeating it lets it through) | Read / Grep / Glob on lockfiles, minified bundles and git-ignored dependency/build folders | `blockHeavyReads` |
 | Denies forked subagents (which copy the whole conversation) and asks for a regular subagent instead. It never changes permission modes or approves anything | Agent | `disableForks` |
 | Holds a prompt once when the cache expired and continuing would cost more than the threshold | Your prompt | `guard`, `guardBlockUsd` |
-| Compacts before the next prompt when the context passes the configured share of the window | Your prompt | `autoCompactPercent` |
+| Compacts the conversation at the end of a turn when the context passes the configured limit | Main conversation | `autoCompactPercent`, `/cato-compact` |
 | Adds a one-line syntax warning after an edit leaves a `.json` or `.py` file broken (the edit itself is unchanged) | Edit / Write, Serena edit tools | `pythonChecks` (Python part) |
 | Adds default compaction instructions when none were given | `/compact`, auto-compaction | `compactInstructions` |
 | Answers its own tools (`mcp__cato__cost_report`, `repo_map`, `structural_search`, `graph_query`, `read_symbol`, `search_sandbox`); no other tool is answered in place of the real one | CATO's tools | — |

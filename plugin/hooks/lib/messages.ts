@@ -11,13 +11,15 @@ const en = {
 
   commands: {
     cato: 'CATO: real cost, cache misses and what would save the most (/cato <days> for another period)',
-    catoHint: '[days | import | doctor | share | experimental [on|off|default]]',
+    catoHint: '[days | import | doctor | share | compact [150k|65%|off|default] | experimental [on|off|default]]',
     doctor: 'CATO: diagnose what spends context on this machine (changes nothing)',
     import: 'CATO: import the cost of sessions from before CATO was installed',
     share: 'CATO: compact 5-line cost and savings card ready to copy and share',
     shareHint: '[days]',
     experimental: 'CATO: show, turn on or turn off the experimental features (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[on | off | default]',
+    compact: 'CATO: show or set when CATO compacts the conversation on its own (e.g. 150k tokens or 65% of the window)',
+    compactHint: '[150k | 65% | off | default]',
   },
 
   report: {
@@ -170,7 +172,20 @@ const en = {
     afterOn: '/cato shows how many reads readGuard redirected, how many were requested again, and what warmCache cost and saved.',
   },
 
+  autoCompact: {
+    title: 'CATO · Auto-compaction',
+    atTokens: (tokens: string, source: string) => `Compacts before your next prompt once the context reaches ${tokens} tokens (${source}).`,
+    atPercent: (pct: string, source: string) => `Compacts before your next prompt once the context reaches ${pct} of the window (${source}).`,
+    disabled: (source: string) => `Auto-compaction is off (${source}).`,
+    sourceOverride: 'set with /cato-compact',
+    sourcePlugin: 'from the /plugin settings',
+    invalid: (value: string) => `"${value}" is not a valid limit. Use a token count such as 150k or 150000, a share of the window such as 65%, off, or default.`,
+    tooLow: (min: string) => `Below ${min} tokens compaction would run on almost every prompt; use ${min} or more.`,
+    usage: 'Use /cato-compact 150k (tokens), /cato-compact 65% (share of the window), /cato-compact off, or /cato-compact default to follow the /plugin settings again.',
+  },
+
   toast: {
+    compactedTokens: (tokens: string) => `🧹 CATO · Context was at ${tokens} tokens: compacted before your prompt.`,
     compacted: (pct: string) => `🧹 CATO · Context was at ${pct} of the window: compacted before your prompt.`,
     coldTokens: (min: string, tokens: string) => `⏳ CATO · Cache expired (${min} min idle): this turn rewrites ${tokens} tokens. Cheaper: /clear or /compact.`,
     coldCost: (min: string, cost: string) => `⏳ CATO · Cache expired (${min} min idle): this turn rewrites ≈ ${cost}. Cheaper: /clear or /compact.`,
@@ -211,13 +226,15 @@ const pt: Messages = {
 
   commands: {
     cato: 'CATO: custo real, cache misses e o que mais economiza (/cato <dias> para outro período)',
-    catoHint: '[dias | import | doctor | compartilhar | experimental [ligar|desligar|padrão]]',
+    catoHint: '[dias | import | doctor | compartilhar | compactar [150k|65%|desligar|padrão] | experimental [ligar|desligar|padrão]]',
     doctor: 'CATO: diagnóstico do que gasta contexto nesta máquina (não altera nada)',
     import: 'CATO: importa o custo das sessões anteriores à instalação',
     share: 'CATO: resumo compacto em 5 linhas pronto para copiar e compartilhar',
     shareHint: '[dias]',
     experimental: 'CATO: mostra, liga ou desliga os recursos experimentais (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[ligar | desligar | padrão]',
+    compact: 'CATO: mostra ou define quando o CATO compacta a conversa sozinho (ex.: 150k tokens ou 65% da janela)',
+    compactHint: '[150k | 65% | desligar | padrão]',
   },
 
   report: {
@@ -367,7 +384,20 @@ const pt: Messages = {
     afterOn: 'O /cato mostra quantas leituras o readGuard desviou, quantas foram pedidas de novo e quanto o warmCache custou e evitou.',
   },
 
+  autoCompact: {
+    title: 'CATO · Autocompactação',
+    atTokens: (tokens, source) => `Compacta antes do seu próximo prompt quando o contexto chega a ${tokens} tokens (${source}).`,
+    atPercent: (pct, source) => `Compacta antes do seu próximo prompt quando o contexto chega a ${pct} da janela (${source}).`,
+    disabled: source => `Autocompactação desligada (${source}).`,
+    sourceOverride: 'definido com /cato-compact',
+    sourcePlugin: 'das configurações do /plugin',
+    invalid: value => `"${value}" não é um limite válido. Use uma quantidade de tokens como 150k ou 150000, uma fatia da janela como 65%, desligar ou padrão.`,
+    tooLow: min => `Abaixo de ${min} tokens a compactação rodaria em quase todo prompt; use ${min} ou mais.`,
+    usage: 'Use /cato-compact 150k (tokens), /cato-compact 65% (fatia da janela), /cato-compact desligar, ou /cato-compact padrão para voltar às configurações do /plugin.',
+  },
+
   toast: {
+    compactedTokens: tokens => `🧹 CATO · O contexto estava em ${tokens} tokens: compactado antes do seu prompt.`,
     compacted: pct => `🧹 CATO · O contexto estava em ${pct} da janela: compactado antes do seu prompt.`,
     coldTokens: (min, tokens) => `⏳ CATO · Cache expirado (${min} min parado): este turno reescreve ${tokens} tokens. Mais barato: /clear ou /compact.`,
     coldCost: (min, cost) => `⏳ CATO · Cache expirado (${min} min parado): este turno reescreve ≈ ${cost}. Mais barato: /clear ou /compact.`,
@@ -406,13 +436,15 @@ const es: Messages = {
 
   commands: {
     cato: 'CATO: costo real, cache misses y lo que más ahorra (/cato <días> para otro período)',
-    catoHint: '[días | import | doctor | compartir | experimental [activar|desactivar|predeterminado]]',
+    catoHint: '[días | import | doctor | compartir | compactar [150k|65%|desactivar|predeterminado] | experimental [activar|desactivar|predeterminado]]',
     doctor: 'CATO: diagnóstico de lo que gasta contexto en esta máquina (no cambia nada)',
     import: 'CATO: importa el costo de las sesiones anteriores a la instalación',
     share: 'CATO: resumen compacto en 5 líneas listo para copiar y compartir',
     shareHint: '[días]',
     experimental: 'CATO: muestra, activa o desactiva las funciones experimentales (readGuard, maskColdCompact, warmCache)',
     experimentalHint: '[activar | desactivar | predeterminado]',
+    compact: 'CATO: muestra o define cuándo CATO compacta la conversación por su cuenta (p. ej. 150k tokens o 65% de la ventana)',
+    compactHint: '[150k | 65% | desactivar | predeterminado]',
   },
 
   report: {
@@ -562,7 +594,20 @@ const es: Messages = {
     afterOn: '/cato muestra cuántas lecturas desvió readGuard, cuántas se pidieron de nuevo y cuánto costó y ahorró warmCache.',
   },
 
+  autoCompact: {
+    title: 'CATO · Autocompactación',
+    atTokens: (tokens, source) => `Compacta antes de tu próximo prompt cuando el contexto llega a ${tokens} tokens (${source}).`,
+    atPercent: (pct, source) => `Compacta antes de tu próximo prompt cuando el contexto llega al ${pct} de la ventana (${source}).`,
+    disabled: source => `Autocompactación desactivada (${source}).`,
+    sourceOverride: 'definido con /cato-compact',
+    sourcePlugin: 'de la configuración de /plugin',
+    invalid: value => `"${value}" no es un límite válido. Usa una cantidad de tokens como 150k o 150000, una parte de la ventana como 65%, desactivar o predeterminado.`,
+    tooLow: min => `Por debajo de ${min} tokens la compactación correría en casi cada prompt; usa ${min} o más.`,
+    usage: 'Usa /cato-compact 150k (tokens), /cato-compact 65% (parte de la ventana), /cato-compact desactivar, o /cato-compact predeterminado para volver a la configuración de /plugin.',
+  },
+
   toast: {
+    compactedTokens: tokens => `🧹 CATO · El contexto estaba en ${tokens} tokens: compactado antes de tu prompt.`,
     compacted: pct => `🧹 CATO · El contexto estaba al ${pct} de la ventana: compactado antes de tu prompt.`,
     coldTokens: (min, tokens) => `⏳ CATO · Caché expirada (${min} min parada): este turno reescribe ${tokens} tokens. Más barato: /clear o /compact.`,
     coldCost: (min, cost) => `⏳ CATO · Caché expirada (${min} min parada): este turno reescribe ≈ ${cost}. Más barato: /clear o /compact.`,
