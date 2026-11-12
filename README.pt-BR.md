@@ -109,6 +109,8 @@ O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: se
 | `ast-grep` | Só se instalado: a ferramenta `structural_search` e o `/cato-doctor` |
 | `rtk` | Só se instalado: `rtk gain`, para mostrar a economia dele no `/cato` |
 
+O CATO nunca roda um gerenciador de pacotes nem muda a configuração dele: os nomes `npm install`, `pip install` e parecidos em `hooks/lib/compress.ts` são padrões que reconhecem a saída desses comandos para comprimi-la.
+
 **A única chamada ao modelo.** O `warmCache` (experimental, **desligado por padrão**) faz uma chamada mínima ao próprio modelo da sessão pouco antes de o cache expirar. Ela passa pelo Claude Code como qualquer turno, e o `/cato` mostra quanto custou.
 
 **Onde ele muda o comportamento do Claude Code.** Cada item tem uma opção em `/plugin` para desligar:

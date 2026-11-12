@@ -1093,9 +1093,13 @@ async function readTranscript($: EngineInterface, file: TranscriptFile, extracto
   return parseJsonlText(String(text))
 }
 
-async function importHistory($: EngineInterface, remainingMs: () => number, width = 100): Promise<string> {
+// Prazo de relógio do /cato-import: o que não couber entra no próximo, pois cada arquivo lido fica registrado
+const IMPORT_WALL_MS = 25_000
+
+async function importHistory($: EngineInterface, width = 100): Promise<string> {
   const ledger = await loadLedger($)
   const now = await $.clock.now()
+  const deadline = now + IMPORT_WALL_MS
   const liveDays = Object.keys(ledger.days).sort()
   const history: History = (await loadHistory($)) ?? {
     liveSince: liveDays.length ? dayStart(liveDays[0]) : now,
@@ -1124,7 +1128,7 @@ async function importHistory($: EngineInterface, remainingMs: () => number, widt
   let added = 0
   let interrupted = 0
   for (const file of todo) {
-    if (remainingMs() < 5_000) break
+    if ((await $.clock.now()) >= deadline) break
     history.pending = { path: file.path, size: file.size, mtimeMs: file.mtimeMs, extractor: extractorName }
     await $.store.set(HISTORY_KEY, history)
     const events = await readTranscript($, file, extractor).catch((error: Error) => `read failed: ${error.message.slice(0, 120)}`)
@@ -2135,11 +2139,10 @@ export const register: Register = (on, rawOptions) => {
   const columns = (e: { presentation?: { columns?: number } }): number => Math.max(60, Math.min(110, Number(e.presentation?.columns) || 100))
 
   on('command.run', { command: 'cato' }, async ($, e, next) => {
-    const budget = next.budget
     await detectLanguage($)
     const arg = String(e.args ?? '').trim().toLowerCase()
     const width = columns(e)
-    if (['import', 'importar'].includes(arg)) return { text: await importHistory($, () => budget.remainingMs, width) }
+    if (['import', 'importar'].includes(arg)) return { text: await importHistory($, width) }
     if (arg === 'doctor') return { text: await doctor($, width) }
     const share = arg.match(/^(?:share|compartilhar|compartir)(?:\s+(.+))?$/)
     if (share) return { text: await shareCard($, days(share[1]), width) }
@@ -2155,9 +2158,8 @@ export const register: Register = (on, rawOptions) => {
     return { text: await doctor($, columns(e)) }
   })
   on('command.run', { command: 'cato-import' }, async ($, e, next) => {
-    const budget = next.budget
     await detectLanguage($)
-    return { text: await importHistory($, () => budget.remainingMs, columns(e)) }
+    return { text: await importHistory($, columns(e)) }
   }).catch(($, e, next) => next(e))
   on('command.run', { command: 'cato-share' }, async ($, e) => {
     await detectLanguage($)

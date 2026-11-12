@@ -109,6 +109,8 @@ CATO runs inside Claude Code. **It sends nothing anywhere**: no telemetry, no ne
 | `ast-grep` | Only if installed: the `structural_search` tool and `/cato-doctor` |
 | `rtk` | Only if installed: `rtk gain` to report its savings in `/cato` |
 
+CATO never runs a package manager or changes its configuration: the `npm install`, `pip install` and similar names in `hooks/lib/compress.ts` are patterns that recognize those commands' output so it can be compressed.
+
 **The one model call.** `warmCache` (experimental, **off by default**) makes one tiny call to the session's own model shortly before the cache expires. It goes through Claude Code like any other turn, and `/cato` shows what it cost.
 
 **Where it changes Claude Code's behavior.** Each one has an option in `/plugin` to turn it off:
