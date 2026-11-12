@@ -5,7 +5,8 @@ import { expect, mock, test } from 'claude-code/testing'
 // (structural_search e graph_query estão em integrations.test.ts). Caminhos POSIX para rodar igual em qualquer sistema.
 
 const PT = { options: { language: 'pt' } }
-const norm = (p: unknown) => String(p).replace(/\\/g, '/')
+// No Windows o motor resolve /home/t como C:\home\t: tira a letra do drive para casar com os caminhos POSIX
+const norm = (p: unknown) => String(p).replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
 
 const FILES: Record<string, string> = {
   '/proj/src/auth.ts': [
@@ -41,7 +42,7 @@ const lookup = (p: unknown): string | undefined => {
 function project(on: On) {
   mock.store(on)
   mock.clock(on)
-  mock.env(on, { HOME: '/home/t' })
+  mock.env(on, { HOME: '/home/t', USERPROFILE: '/home/t' })
   on('session.cwd', () => ({ value: '/proj' }))
   on('tool.check', () => ({ decision: 'allow' }))
   on('fs.exists', (_, e) => ({ value: !!lookup(e.path) }))
