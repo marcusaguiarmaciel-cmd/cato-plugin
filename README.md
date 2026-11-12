@@ -93,9 +93,9 @@ Options live in `/plugin`, in CATO's settings.
 
 CATO runs inside Claude Code. **It sends nothing anywhere**: no telemetry, no network calls of its own and no external npm dependencies. Everything it reads stays on your machine.
 
-**What it reads.** Your session transcripts in `~/.claude/projects` (for `/cato` and `/cato-import`). For `/cato-doctor`: `settings.json`, `settings.local.json`, `.mcp.json` and `~/.claude.json`. From `~/.claude.json` it only takes the names of the configured MCP servers and projects, to count them; it never stores or sends any of it, including any account or credential data in that file. Files that look like secrets (`.env`, `*.pem`, `*.key`, `id_rsa`…) are never read by CATO's tools.
+**What it reads.** Your session transcripts in `~/.claude/projects` (for `/cato` and `/cato-import`). For `/cato-doctor`: `settings.json`, `settings.local.json` and the project's `.mcp.json`; MCP servers are counted from the tool names seen in the session. It never reads `~/.claude.json`, credentials or account data. Files that look like secrets (`.env`, `*.pem`, `*.key`, `id_rsa`…) are never read by CATO's tools.
 
-**What it writes.** Only inside `~/.cato/logs` (raw logs of compressed shell output) and `~/.cato/sandbox` (large MCP responses), plus its own store in Claude Code. Files there are deleted after 14 days. It never writes settings, build files, `CLAUDE.md` or any file in your project.
+**What it writes.** Only inside `~/.cato/logs` (raw logs of compressed shell output) and `~/.cato/sandbox` (large MCP responses), plus its own store in Claude Code. Files there are deleted after 14 days. These are plain-text logs and JSON for CATO's own search tools; nothing runs or loads them. It never writes settings, build files, `CLAUDE.md` or any file in your project.
 
 **Programs it runs.** Always by name, with fixed arguments, never through a shell:
 
@@ -121,6 +121,12 @@ CATO runs inside Claude Code. **It sends nothing anywhere**: no telemetry, no ne
 | Denies a read once (repeating it lets it through) | Read / Grep / Glob on lockfiles, minified bundles and git-ignored dependency/build folders | `blockHeavyReads` |
 | Denies forked subagents (which copy the whole conversation) and asks for a regular subagent instead. It never changes permission modes or approves anything | Agent | `disableForks` |
 | Holds a prompt once when the cache expired and continuing would cost more than the threshold | Your prompt | `guard`, `guardBlockUsd` |
+| Compacts before the next prompt when the context passes the configured share of the window | Your prompt | `autoCompactPercent` |
+| Adds a one-line syntax warning after an edit leaves a `.json` or `.py` file broken (the edit itself is unchanged) | Edit / Write, Serena edit tools | `pythonChecks` (Python part) |
+| Adds default compaction instructions when none were given | `/compact`, auto-compaction | `compactInstructions` |
+| Answers its own tools (`mcp__cato__cost_report`, `repo_map`, `structural_search`, `graph_query`, `read_symbol`, `search_sandbox`); no other tool is answered in place of the real one | CATO's tools | — |
+
+CATO also watches tool descriptions (`tool.describe`) and engine reminders only to measure their size for `/cato-doctor`; it returns them unchanged.
 
 Privacy: [PRIVACY.md](PRIVACY.md).
 

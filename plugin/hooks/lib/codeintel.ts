@@ -137,16 +137,16 @@ function pagerank(nodes: string[], edges: Map<string, Map<string, number>>, pers
   const pers = new Map(nodes.map(k => [k, total > 0 ? (personal.get(k) ?? 0) / total : 1 / n]))
   let ranks = new Map(pers)
   for (let it = 0; it < iterations; it++) {
-    const next = new Map(nodes.map(k => [k, (1 - alpha) * pers.get(k)!]))
+    const nextRanks = new Map(nodes.map(k => [k, (1 - alpha) * pers.get(k)!]))
     let dangling = 0
     for (const u of nodes) {
       const out = edges.get(u)
       const w = out ? [...out.values()].reduce((a, b) => a + b, 0) : 0
-      if (w > 0) for (const [v, weight] of out!) next.set(v, next.get(v)! + alpha * ranks.get(u)! * (weight / w))
+      if (w > 0) for (const [v, weight] of out!) nextRanks.set(v, nextRanks.get(v)! + alpha * ranks.get(u)! * (weight / w))
       else dangling += ranks.get(u)!
     }
-    if (dangling > 0) for (const k of nodes) next.set(k, next.get(k)! + alpha * dangling * pers.get(k)!)
-    ranks = next
+    if (dangling > 0) for (const k of nodes) nextRanks.set(k, nextRanks.get(k)! + alpha * dangling * pers.get(k)!)
+    ranks = nextRanks
   }
   return ranks
 }

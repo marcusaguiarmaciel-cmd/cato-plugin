@@ -7,7 +7,7 @@ CATO is a Claude Code plugin that runs entirely on your machine. It has no serve
 ## What CATO reads
 
 - **Claude Code session transcripts** (`~/.claude/projects`), for `/cato` and `/cato-import`. Only token usage, model, timestamps and tool names are used.
-- **Claude Code settings** (`settings.json`, `settings.local.json`, `.mcp.json`, `~/.claude.json`), for `/cato-doctor`. `~/.claude.json` may contain your account email; CATO only uses the names of configured MCP servers and projects and ignores everything else.
+- **Claude Code settings** (`settings.json`, `settings.local.json` and the project's `.mcp.json`), for `/cato-doctor`. CATO does not read `~/.claude.json` or any credential file.
 - **Tool output** in the current session (shell commands, MCP responses), to compress or sandbox it.
 
 ## What CATO stores

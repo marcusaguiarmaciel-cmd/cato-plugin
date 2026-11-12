@@ -93,9 +93,9 @@ As opções ficam no `/plugin`, na configuração do CATO.
 
 O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: sem telemetria, sem chamadas de rede próprias e sem dependências npm externas. Tudo o que ele lê fica na sua máquina.
 
-**O que ele lê.** As transcrições das sessões em `~/.claude/projects` (para `/cato` e `/cato-import`). No `/cato-doctor`: `settings.json`, `settings.local.json`, `.mcp.json` e `~/.claude.json`. Do `~/.claude.json` ele só pega os nomes dos servidores MCP e dos projetos configurados, para contá-los; nada é guardado nem enviado, incluindo dados de conta ou credenciais desse arquivo. Arquivos com cara de segredo (`.env`, `*.pem`, `*.key`, `id_rsa`…) nunca são lidos pelas ferramentas do CATO.
+**O que ele lê.** As transcrições das sessões em `~/.claude/projects` (para `/cato` e `/cato-import`). No `/cato-doctor`: `settings.json`, `settings.local.json` e o `.mcp.json` do projeto; os servidores MCP são contados pelos nomes das ferramentas vistas na sessão. Ele nunca lê o `~/.claude.json`, credenciais ou dados de conta. Arquivos com cara de segredo (`.env`, `*.pem`, `*.key`, `id_rsa`…) nunca são lidos pelas ferramentas do CATO.
 
-**O que ele escreve.** Só dentro de `~/.cato/logs` (logs brutos das saídas de shell comprimidas) e `~/.cato/sandbox` (respostas MCP grandes), além do próprio store dentro do Claude Code. Os arquivos ali são apagados após 14 dias. Ele nunca escreve settings, arquivos de build, `CLAUDE.md` nem nenhum arquivo do seu projeto.
+**O que ele escreve.** Só dentro de `~/.cato/logs` (logs brutos das saídas de shell comprimidas) e `~/.cato/sandbox` (respostas MCP grandes), além do próprio store dentro do Claude Code. Os arquivos ali são apagados após 14 dias. São logs em texto puro e JSON para as ferramentas de busca do próprio CATO; nada os executa nem carrega. Ele nunca escreve settings, arquivos de build, `CLAUDE.md` nem nenhum arquivo do seu projeto.
 
 **Programas que ele roda.** Sempre pelo nome, com argumentos fixos, nunca por um shell:
 
@@ -121,6 +121,12 @@ O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: se
 | Nega uma leitura uma vez (repetir libera) | Read / Grep / Glob em lockfiles, bundles minificados e pastas de dependência/build ignoradas pelo git | `blockHeavyReads` |
 | Nega subagentes em fork (que copiam a conversa inteira) e pede um subagente comum. Nunca muda modos de permissão nem aprova nada | Agent | `disableForks` |
 | Segura um prompt uma vez quando o cache expirou e continuar custaria mais que o limite | Seu prompt | `guard`, `guardBlockUsd` |
+| Compacta antes do próximo prompt quando o contexto passa da fatia configurada da janela | Seu prompt | `autoCompactPercent` |
+| Acrescenta um aviso de sintaxe de uma linha quando uma edição deixa um `.json` ou `.py` quebrado (a edição em si não muda) | Edit / Write, ferramentas de edição da Serena | `pythonChecks` (parte em Python) |
+| Acrescenta instruções de compactação padrão quando ninguém deu instruções | `/compact`, autocompactação | `compactInstructions` |
+| Responde às próprias ferramentas (`mcp__cato__cost_report`, `repo_map`, `structural_search`, `graph_query`, `read_symbol`, `search_sandbox`); nenhuma outra ferramenta é respondida no lugar da real | Ferramentas do CATO | — |
+
+O CATO também observa as descrições de ferramentas (`tool.describe`) e os lembretes do motor só para medir o tamanho no `/cato-doctor`; ele os devolve sem mudança.
 
 Privacidade: [PRIVACY.md](PRIVACY.md) (em inglês).
 

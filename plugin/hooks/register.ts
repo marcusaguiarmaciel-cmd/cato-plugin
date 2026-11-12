@@ -1240,28 +1240,22 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
     const fromSettings = settings.reduce<unknown>((v, s) => ((s.env as Json | undefined)?.[name] ?? v), undefined)
     return typeof fromSettings === 'string' ? fromSettings : ''
   }
-  const configClaudeJsonText = await $.fs.read(`${cfg}/.claude.json`).catch(() => null)
-  let claudeJson = parseJsonObject(configClaudeJsonText)
-  if (!claudeJson) {
-    const homeClaudeJsonText = await $.fs.read(`${home}/.claude.json`).catch(() => null)
-    claudeJson = parseJsonObject(homeClaudeJsonText)
-  }
-  const projects = (claudeJson?.projects ?? {}) as Record<string, Json>
-  const projectEntry = projects[cwd] ?? projects[cwd.replace(/\//g, '\\')] ?? null
+  // Servidores MCP: os do .mcp.json do projeto e os que expuseram ferramentas nesta sessão (mcp__<servidor>__…).
+  // O ~/.claude.json não é lido: ele guarda dados da conta.
   const mcpJsonText = await $.fs.read(`${cwd}/.mcp.json`).catch(() => null)
   const mcpJson = parseJsonObject(mcpJsonText)
-  const mcpServers = [
-    ...objectKeys(claudeJson?.mcpServers),
-    ...objectKeys(projectEntry?.mcpServers),
-    ...objectKeys(mcpJson?.mcpServers),
-  ]
+  const projectMcpServers = objectKeys(mcpJson?.mcpServers)
+  const sessionMcpServers = [...seenTools.keys()]
+    .map(name => /^mcp__(.+?)__/.exec(name)?.[1])
+    .filter((server): server is string => !!server && server !== 'cato')
+  const mcpServers = [...new Set([...projectMcpServers, ...sessionMcpServers])]
   const plugins = settings.flatMap(s => objectKeys(s.enabledPlugins))
 
   info(m.language(LANG_NAMES[lang], m.langSources[langSource]))
 
   section(m.conflicts)
   const legacyHooks = /\bcato\b/i.test(JSON.stringify(settings.map(s => s.hooks ?? {})))
-  const legacyMcp = mcpServers.some(name => name.toLowerCase() === 'cato')
+  const legacyMcp = projectMcpServers.some(name => name.toLowerCase() === 'cato')
   if (legacyHooks || legacyMcp) {
     bad(m.legacyBad([legacyHooks && m.legacyHooks, legacyMcp && m.legacyMcp].filter(Boolean).join(` ${t().and} `)))
   } else {
@@ -1567,10 +1561,8 @@ export const register: Register = (on, rawOptions) => {
     const pct = usage.context.percent ?? 0
     if (options.autoCompactPercent > 0 && pct >= options.autoCompactPercent) {
       const instructions = compactInstructions()
-      const compacted = await $.session
-        .compact(instructions ? { instructions } : {})
-        .then(r => !('skip' in r && r.skip))
-        .catch(() => false)
+      const compactCall = $.session.compact(instructions ? { instructions } : {})
+      const compacted = await compactCall.then(r => !('skip' in r && r.skip)).catch(() => false)
       if (compacted) {
         $.ui.toast(t().toast.compacted(f.pct(pct / 100)), { timeoutMs: WARN_TOAST_MS })
         return next(withPending())
@@ -1889,10 +1881,9 @@ export const register: Register = (on, rawOptions) => {
     }
     const id = `sbx_${randomId()}`
     const chunks = chunkLines(text)
-    const saved = await $.fs
-      .write(`${await homeDir($)}/.cato/sandbox/${id}.json`, JSON.stringify({ tool, chunks }))
-      .then(() => true)
-      .catch(() => false)
+    const sandboxPath = `${await homeDir($)}/.cato/sandbox/${id}.json`
+    const writeCall = $.fs.write(sandboxPath, JSON.stringify({ tool, chunks }))
+    const saved = await writeCall.then(() => true).catch(() => false)
     if (!saved) return current
     const lines = text.split('\n')
     const head = text.slice(0, SANDBOX_PREVIEW_CHARS)
@@ -2008,21 +1999,20 @@ export const register: Register = (on, rawOptions) => {
       description: "CATO's recorded real cost: periods, cache misses by cause, tokens saved, advice.",
       inputSchema: { type: 'object', properties: { days: { type: 'number' } } },
     })
-    await $.agent
-      .register({
-        name: 'cato-explorer',
-        description: 'Broad codebase exploration (find symbols across files, trace dependencies) so raw reads stay out of the main context.',
-        prompt: EXPLORER_PROMPT(hasGraph, hasAstGrep),
-        tools: [
-          'Read', 'Grep', 'Glob', 'mcp__cato__repo_map', 'mcp__cato__read_symbol',
-          ...(hasAstGrep ? ['mcp__cato__structural_search'] : []),
-          ...(hasGraph ? ['mcp__cato__graph_query'] : []),
-        ],
-        model: 'haiku',
-        maxTurns: 18,
-        omitClaudeMd: true,
-      })
-      .catch(() => undefined)
+    const agentCall = $.agent.register({
+      name: 'cato-explorer',
+      description: 'Broad codebase exploration (find symbols across files, trace dependencies) so raw reads stay out of the main context.',
+      prompt: EXPLORER_PROMPT(hasGraph, hasAstGrep),
+      tools: [
+        'Read', 'Grep', 'Glob', 'mcp__cato__repo_map', 'mcp__cato__read_symbol',
+        ...(hasAstGrep ? ['mcp__cato__structural_search'] : []),
+        ...(hasGraph ? ['mcp__cato__graph_query'] : []),
+      ],
+      model: 'haiku',
+      maxTurns: 18,
+      omitClaudeMd: true,
+    })
+    await agentCall.catch(() => undefined)
     await detectLanguage($)
     const c = t().commands
     await $.command.register({ name: 'cato', description: c.cato, argumentHint: c.catoHint })
@@ -2045,10 +2035,11 @@ export const register: Register = (on, rawOptions) => {
   const columns = (e: { presentation?: { columns?: number } }): number => Math.max(60, Math.min(110, Number(e.presentation?.columns) || 100))
 
   on('command.run', { command: 'cato' }, async ($, e, next) => {
+    const budget = next.budget
     await detectLanguage($)
     const arg = String(e.args ?? '').trim().toLowerCase()
     const width = columns(e)
-    if (['import', 'importar'].includes(arg)) return { text: await importHistory($, () => next.budget.remainingMs, width) }
+    if (['import', 'importar'].includes(arg)) return { text: await importHistory($, () => budget.remainingMs, width) }
     if (arg === 'doctor') return { text: await doctor($, width) }
     const share = arg.match(/^(?:share|compartilhar|compartir)(?:\s+(.+))?$/)
     if (share) return { text: await shareCard($, days(share[1]), width) }
@@ -2062,8 +2053,9 @@ export const register: Register = (on, rawOptions) => {
     return { text: await doctor($, columns(e)) }
   })
   on('command.run', { command: 'cato-import' }, async ($, e, next) => {
+    const budget = next.budget
     await detectLanguage($)
-    return { text: await importHistory($, () => next.budget.remainingMs, columns(e)) }
+    return { text: await importHistory($, () => budget.remainingMs, columns(e)) }
   }).catch(($, e, next) => next(e))
   on('command.run', { command: 'cato-share' }, async ($, e) => {
     await detectLanguage($)
