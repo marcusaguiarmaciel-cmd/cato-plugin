@@ -47,6 +47,19 @@ export type Day = {
   warms: number
   warmCost: number
   warmSaved: number
+  // Conversa principal com o Ponytail instalado, por nível ativo: chamadas, tokens de saída e custo
+  ptLiteCalls: number
+  ptLiteOutput: number
+  ptLiteCost: number
+  ptFullCalls: number
+  ptFullOutput: number
+  ptFullCost: number
+  ptUltraCalls: number
+  ptUltraOutput: number
+  ptUltraCost: number
+  ptOffCalls: number
+  ptOffOutput: number
+  ptOffCost: number
 }
 
 export type Ledger = { days: Record<string, Day> }
@@ -58,7 +71,12 @@ export const emptyDay = (): Day => ({
   compressions: 0, compressedTokens: 0, blockedReads: 0, guardHolds: 0, readGuardDenies: 0, readGuardBypass: 0,
   blockedTokens: 0, readGuardTokens: 0, sandboxed: 0, sandboxTokens: 0, masks: 0, maskedTokens: 0,
   warms: 0, warmCost: 0, warmSaved: 0,
+  ptLiteCalls: 0, ptLiteOutput: 0, ptLiteCost: 0, ptFullCalls: 0, ptFullOutput: 0, ptFullCost: 0,
+  ptUltraCalls: 0, ptUltraOutput: 0, ptUltraCost: 0, ptOffCalls: 0, ptOffOutput: 0, ptOffCost: 0,
 })
+
+export type PonytailBucket = 'Lite' | 'Full' | 'Ultra' | 'Off'
+export const PONYTAIL_BUCKETS: readonly PonytailBucket[] = ['Lite', 'Full', 'Ultra', 'Off']
 
 // Dia no fuso local: em UTC o "hoje" do Brasil viraria às 21h
 export const dayKey = (ms: number): string => {

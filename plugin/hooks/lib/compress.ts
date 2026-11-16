@@ -280,8 +280,24 @@ export function compressGitDiff(command: string, text: string): Compressed {
 
 export type Optimized = Compressed & { strategy: string }
 
+// Linhas de resumo de test runners (pytest, jest/vitest, mocha, cargo, node --test, TAP): o modelo e outros
+// plugins (a faixa do Ponytail conta "N passed / N failed" no resultado) leem a contagem daqui
+const TEST_SUMMARY_RE = /\b\d+ (?:passed|passing|failed|failing)\b|^\s*(?:#|ℹ) (?:pass|fail|tests) \d+\s*$|^test result: /
+
+/** Devolve ao fim do texto comprimido as linhas de resumo de testes que a compressão cortou. */
+export function keepTestSummary(raw: string, compressed: string): string {
+  const kept = new Set(compressed.split('\n').map(l => l.trim()))
+  const missing = raw.split('\n').map(l => l.trim()).filter(l => l && TEST_SUMMARY_RE.test(l) && !kept.has(l))
+  return missing.length ? [compressed, ...[...new Set(missing)].slice(-10)].join('\n') : compressed
+}
+
 /** Ponto de entrada: `{ text, changed, strategy, omittedErrors }`. Saídas que não são de uma categoria ruidosa voltam iguais. */
 export function optimizeOutput(command: string, raw: string): Optimized {
+  const result = optimizeRaw(command, raw)
+  return result.changed ? { ...result, text: keepTestSummary(stripAnsiAndProgress(raw), result.text) } : result
+}
+
+function optimizeRaw(command: string, raw: string): Optimized {
   if (!raw) return { text: '', changed: false, strategy: 'empty', omittedErrors: 0 }
   const cleaned = stripAnsiAndProgress(raw)
   const ansiRemoved = cleaned.length < raw.length - 20

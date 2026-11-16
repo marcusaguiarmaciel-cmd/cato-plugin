@@ -37,7 +37,7 @@ test('/cato-compact 150k compacta quando o contexto passa de 150 mil tokens, mes
   expect(await run($, 'cato-compact', '150k')).toContain('150 mil tokens (definido com /cato-compact)')
   await endTurn($)
   expect(seen.compactions).toBe(1)
-  expect(seen.toasts.join('\n')).toContain('160 mil tokens: compactado')
+  expect(seen.toasts.join('\n')).toContain('160 mil tokens: compactado ao fim do turno')
 })
 
 test('/cato-compact: abaixo do limite em tokens nada acontece', PT, async ($, on) => {

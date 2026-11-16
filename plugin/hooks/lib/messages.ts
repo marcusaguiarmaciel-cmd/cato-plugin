@@ -119,6 +119,11 @@ const en = {
     githubMissing: 'GitHub MCP not configured (optional).',
     pythonOk: 'Python found: .py syntax check after edits is on.',
     pythonMissing: 'Python not found: only JSON is checked after edits.',
+    ponytailOk: (level: string) => `Ponytail detected (level: ${level}). CATO records output tokens and cost per level in /cato.`,
+    ponytailSubagents: (tokens: string, regex: string) =>
+      `Ponytail adds ~${tokens} tokens of rules to every subagent, read-only ones included (Explore, cato-explorer). To skip those, add "PONYTAIL_SUBAGENT_MATCHER": "${regex}" to "env" in settings.json.`,
+    ponytailScoped: (regex: string) => `Ponytail rules reach only subagents matching ${regex}.`,
+    ponytailBand: "Ponytail band shown: CATO's status line leaves out the session cost the band already shows.",
     claudeMdBig: (label: string, lines: string) =>
       `${label}: ${lines} lines (the docs recommend under 200; workflow-specific instructions work better as skills).`,
     claudeMdOk: (label: string, lines: string) => `${label}: ${lines} lines.`,
@@ -172,10 +177,18 @@ const en = {
     afterOn: '/cato shows how many reads readGuard redirected, how many were requested again, and what warmCache cost and saved.',
   },
 
+  ponytail: {
+    title: 'Ponytail — main conversation by level',
+    cols: ['Level', 'Calls', 'Output/call', 'Cost/call'],
+    levels: { Lite: 'lite', Full: 'full', Ultra: 'ultra', Off: 'off' },
+    compare: (pct: string) => `With Ponytail on, each call wrote ${pct} fewer output tokens than with it off.`,
+    note: 'Averages per call depend on the tasks of each period: compare over days with similar work.',
+  },
+
   autoCompact: {
     title: 'CATO · Auto-compaction',
-    atTokens: (tokens: string, source: string) => `Compacts before your next prompt once the context reaches ${tokens} tokens (${source}).`,
-    atPercent: (pct: string, source: string) => `Compacts before your next prompt once the context reaches ${pct} of the window (${source}).`,
+    atTokens: (tokens: string, source: string) => `Compacts at the end of a turn once the context reaches ${tokens} tokens (${source}).`,
+    atPercent: (pct: string, source: string) => `Compacts at the end of a turn once the context reaches ${pct} of the window (${source}).`,
     disabled: (source: string) => `Auto-compaction is off (${source}).`,
     sourceOverride: 'set with /cato-compact',
     sourcePlugin: 'from the /plugin settings',
@@ -185,8 +198,8 @@ const en = {
   },
 
   toast: {
-    compactedTokens: (tokens: string) => `🧹 CATO · Context was at ${tokens} tokens: compacted before your prompt.`,
-    compacted: (pct: string) => `🧹 CATO · Context was at ${pct} of the window: compacted before your prompt.`,
+    compactedTokens: (tokens: string) => `🧹 CATO · Context was at ${tokens} tokens: compacted at the end of the turn.`,
+    compacted: (pct: string) => `🧹 CATO · Context was at ${pct} of the window: compacted at the end of the turn.`,
     coldTokens: (min: string, tokens: string) => `⏳ CATO · Cache expired (${min} min idle): this turn rewrites ${tokens} tokens. Cheaper: /clear or /compact.`,
     coldCost: (min: string, cost: string) => `⏳ CATO · Cache expired (${min} min idle): this turn rewrites ≈ ${cost}. Cheaper: /clear or /compact.`,
     modelSwitch: (from: string, to: string, tokens: string, cost: string | null) =>
@@ -333,6 +346,11 @@ const pt: Messages = {
     githubMissing: 'GitHub MCP não configurado (opcional).',
     pythonOk: 'Python encontrado: checagem de sintaxe de .py após edições ativa.',
     pythonMissing: 'Python não encontrado: só JSON é checado após edições.',
+    ponytailOk: level => `Ponytail detectado (nível: ${level}). O CATO registra tokens de saída e custo por nível no /cato.`,
+    ponytailSubagents: (tokens, regex) =>
+      `O Ponytail acrescenta ~${tokens} tokens de regras em todo subagente, inclusive os só de leitura (Explore, cato-explorer). Para pular esses, adicione "PONYTAIL_SUBAGENT_MATCHER": "${regex}" no "env" do settings.json.`,
+    ponytailScoped: regex => `As regras do Ponytail só chegam aos subagentes que casam com ${regex}.`,
+    ponytailBand: 'Faixa do Ponytail visível: o status do CATO deixa de fora o custo da sessão, que a faixa já mostra.',
     claudeMdBig: (label, lines) => `${label}: ${lines} linhas (a documentação recomenda menos de 200; instruções de fluxos específicos rendem mais como skills).`,
     claudeMdOk: (label, lines) => `${label}: ${lines} linhas.`,
     mcpMany: n => `${n} servidores MCP configurados: desative em /mcp os que não usa (uma CLI como o gh custa menos contexto).`,
@@ -384,10 +402,18 @@ const pt: Messages = {
     afterOn: 'O /cato mostra quantas leituras o readGuard desviou, quantas foram pedidas de novo e quanto o warmCache custou e evitou.',
   },
 
+  ponytail: {
+    title: 'Ponytail — conversa principal por nível',
+    cols: ['Nível', 'Chamadas', 'Saída/chamada', 'Custo/chamada'],
+    levels: { Lite: 'lite', Full: 'full', Ultra: 'ultra', Off: 'desligado' },
+    compare: pct => `Com o Ponytail ligado, cada chamada escreveu ${pct} menos tokens de saída do que com ele desligado.`,
+    note: 'As médias por chamada dependem das tarefas de cada período: compare dias com trabalho parecido.',
+  },
+
   autoCompact: {
     title: 'CATO · Autocompactação',
-    atTokens: (tokens, source) => `Compacta antes do seu próximo prompt quando o contexto chega a ${tokens} tokens (${source}).`,
-    atPercent: (pct, source) => `Compacta antes do seu próximo prompt quando o contexto chega a ${pct} da janela (${source}).`,
+    atTokens: (tokens, source) => `Compacta ao fim do turno quando o contexto chega a ${tokens} tokens (${source}).`,
+    atPercent: (pct, source) => `Compacta ao fim do turno quando o contexto chega a ${pct} da janela (${source}).`,
     disabled: source => `Autocompactação desligada (${source}).`,
     sourceOverride: 'definido com /cato-compact',
     sourcePlugin: 'das configurações do /plugin',
@@ -397,8 +423,8 @@ const pt: Messages = {
   },
 
   toast: {
-    compactedTokens: tokens => `🧹 CATO · O contexto estava em ${tokens} tokens: compactado antes do seu prompt.`,
-    compacted: pct => `🧹 CATO · O contexto estava em ${pct} da janela: compactado antes do seu prompt.`,
+    compactedTokens: tokens => `🧹 CATO · O contexto estava em ${tokens} tokens: compactado ao fim do turno.`,
+    compacted: pct => `🧹 CATO · O contexto estava em ${pct} da janela: compactado ao fim do turno.`,
     coldTokens: (min, tokens) => `⏳ CATO · Cache expirado (${min} min parado): este turno reescreve ${tokens} tokens. Mais barato: /clear ou /compact.`,
     coldCost: (min, cost) => `⏳ CATO · Cache expirado (${min} min parado): este turno reescreve ≈ ${cost}. Mais barato: /clear ou /compact.`,
     modelSwitch: (from, to, tokens, cost) =>
@@ -543,6 +569,11 @@ const es: Messages = {
     githubMissing: 'GitHub MCP no configurado (opcional).',
     pythonOk: 'Python encontrado: revisión de sintaxis de .py tras editar activada.',
     pythonMissing: 'Python no encontrado: tras editar solo se revisa JSON.',
+    ponytailOk: level => `Ponytail detectado (nivel: ${level}). CATO registra tokens de salida y costo por nivel en /cato.`,
+    ponytailSubagents: (tokens, regex) =>
+      `Ponytail agrega ~${tokens} tokens de reglas a cada subagente, incluidos los de solo lectura (Explore, cato-explorer). Para omitirlos, agrega "PONYTAIL_SUBAGENT_MATCHER": "${regex}" en "env" de settings.json.`,
+    ponytailScoped: regex => `Las reglas de Ponytail solo llegan a los subagentes que coinciden con ${regex}.`,
+    ponytailBand: 'Banda de Ponytail visible: el estado de CATO omite el costo de la sesión, que la banda ya muestra.',
     claudeMdBig: (label, lines) => `${label}: ${lines} líneas (la documentación recomienda menos de 200; las instrucciones de flujos específicos rinden más como skills).`,
     claudeMdOk: (label, lines) => `${label}: ${lines} líneas.`,
     mcpMany: n => `${n} servidores MCP configurados: desactiva en /mcp los que no uses (una CLI como gh cuesta menos contexto).`,
@@ -594,10 +625,18 @@ const es: Messages = {
     afterOn: '/cato muestra cuántas lecturas desvió readGuard, cuántas se pidieron de nuevo y cuánto costó y ahorró warmCache.',
   },
 
+  ponytail: {
+    title: 'Ponytail — conversación principal por nivel',
+    cols: ['Nivel', 'Llamadas', 'Salida/llamada', 'Costo/llamada'],
+    levels: { Lite: 'lite', Full: 'full', Ultra: 'ultra', Off: 'desactivado' },
+    compare: pct => `Con Ponytail activado, cada llamada escribió ${pct} menos tokens de salida que con él desactivado.`,
+    note: 'Los promedios por llamada dependen de las tareas de cada período: compara días con trabajo parecido.',
+  },
+
   autoCompact: {
     title: 'CATO · Autocompactación',
-    atTokens: (tokens, source) => `Compacta antes de tu próximo prompt cuando el contexto llega a ${tokens} tokens (${source}).`,
-    atPercent: (pct, source) => `Compacta antes de tu próximo prompt cuando el contexto llega al ${pct} de la ventana (${source}).`,
+    atTokens: (tokens, source) => `Compacta al final del turno cuando el contexto llega a ${tokens} tokens (${source}).`,
+    atPercent: (pct, source) => `Compacta al final del turno cuando el contexto llega al ${pct} de la ventana (${source}).`,
     disabled: source => `Autocompactación desactivada (${source}).`,
     sourceOverride: 'definido con /cato-compact',
     sourcePlugin: 'de la configuración de /plugin',
@@ -607,8 +646,8 @@ const es: Messages = {
   },
 
   toast: {
-    compactedTokens: tokens => `🧹 CATO · El contexto estaba en ${tokens} tokens: compactado antes de tu prompt.`,
-    compacted: pct => `🧹 CATO · El contexto estaba al ${pct} de la ventana: compactado antes de tu prompt.`,
+    compactedTokens: tokens => `🧹 CATO · El contexto estaba en ${tokens} tokens: compactado al final del turno.`,
+    compacted: pct => `🧹 CATO · El contexto estaba al ${pct} de la ventana: compactado al final del turno.`,
     coldTokens: (min, tokens) => `⏳ CATO · Caché expirada (${min} min parada): este turno reescribe ${tokens} tokens. Más barato: /clear o /compact.`,
     coldCost: (min, cost) => `⏳ CATO · Caché expirada (${min} min parada): este turno reescribe ≈ ${cost}. Más barato: /clear o /compact.`,
     modelSwitch: (from, to, tokens, cost) =>

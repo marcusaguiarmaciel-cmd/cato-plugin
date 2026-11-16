@@ -31,8 +31,8 @@ import type { Fmt, Lang } from './lib/format.ts'
 import { EXPERIMENTAL_WORDS, MESSAGES } from './lib/messages.ts'
 import type { Messages } from './lib/messages.ts'
 import type { StepUsage } from './lib/pricing.ts'
-import { addDay, dayKey, dayStart, emptyDay } from './lib/ledger.ts'
-import type { Day, Ledger } from './lib/ledger.ts'
+import { addDay, dayKey, dayStart, emptyDay, PONYTAIL_BUCKETS } from './lib/ledger.ts'
+import type { Day, Ledger, PonytailBucket } from './lib/ledger.ts'
 import { aggregate, AWK_EXTRACT, parseExtract, parseJsonlText, powershellExtract } from './lib/history.ts'
 import type { TranscriptEvent } from './lib/history.ts'
 import { maskOldToolResults } from './lib/compaction.ts'
@@ -65,7 +65,8 @@ type Options = {
 const CATO_COMPACT =
   "Keep the current goal and the user's open requests; the decisions made and why; the paths of changed files; " +
   'errors and failing tests with the exact message; and the next steps. Do not reproduce file contents, tool output ' +
-  "or logs: cite paths and CATO's #cmd_/#sbx_ IDs. Be concise and write the summary in the conversation's language."
+  "or logs: cite paths and CATO's #cmd_/#sbx_ IDs. Be concise and write the summary in the conversation's language." +
+  " Do not restate rules or mode instructions that plugins or hooks inject (such as PONYTAIL MODE): they are injected again after compaction."
 
 /** Instruções do CATO para a compactação; string vazia nas opções desliga. */
 const compactInstructions = (): string =>
@@ -588,7 +589,9 @@ async function refreshStatus($: EngineInterface): Promise<void> {
       parts.push(m.expiresIn(String(Math.ceil((ttlMs - idle) / 60_000))))
     }
   }
-  if (usage.cost) parts.push(m.session(f.money(usage.cost.usd)))
+  // A faixa do Ponytail já mostra o custo da tarefa: o status fica só com cache e contexto
+  const ponytail = await ponytailState($).catch(() => null)
+  if (usage.cost && !ponytail?.band) parts.push(m.session(f.money(usage.cost.usd)))
   $.ui.status(parts.join(' · '))
 }
 
@@ -874,6 +877,30 @@ async function costReport($: EngineInterface, days: number, width = 100): Promis
         [false, true, true],
       ),
     )
+  }
+
+  // Ponytail: saída e custo médios por chamada em cada nível usado no período (só aparece com dados)
+  const ptRows = PONYTAIL_BUCKETS.filter(b => period[`pt${b}Calls`] > 0)
+  if (ptRows.length) {
+    const p = t().ponytail
+    out.push('', `▸ ${p.title}`)
+    out.push(
+      ...table(
+        [
+          p.cols,
+          ...ptRows.map(b => {
+            const calls = period[`pt${b}Calls`]
+            return [p.levels[b], f.int(calls), f.tokens(period[`pt${b}Output`] / calls), f.money(period[`pt${b}Cost`] / calls, 3)]
+          }),
+        ],
+        [false, true, true, true],
+      ),
+    )
+    const off = period.ptOffCalls ? period.ptOffOutput / period.ptOffCalls : 0
+    const onCalls = period.ptLiteCalls + period.ptFullCalls + period.ptUltraCalls
+    const on = onCalls ? (period.ptLiteOutput + period.ptFullOutput + period.ptUltraOutput) / onCalls : 0
+    if (off > 0 && on > 0) out.push(...wrap(p.compare(f.pct(1 - on / off)), width, '  '))
+    out.push(...wrap(p.note, width, '  '))
   }
 
   // Cada token poupado entraria no contexto como escrita de cache; nos turnos seguintes ainda seria relido
@@ -1275,6 +1302,15 @@ async function doctor($: EngineInterface, width = 100): Promise<string> {
   mcpServers.some(n => /serena/i.test(n)) ? ok(m.serenaOk) : info(m.serenaMissing)
   mcpServers.some(n => /github/i.test(n)) || plugins.some(p => /github/i.test(p)) ? ok(m.githubOk) : info(m.githubMissing)
   if (options.pythonChecks) (await findPython($)) ? ok(m.pythonOk) : info(m.pythonMissing)
+  ponytailCache = null
+  const ponytail = await ponytailState($).catch(() => null)
+  if (ponytail?.installed) {
+    ok(m.ponytailOk(ponytail.level))
+    ponytail.subagentMatcher
+      ? ok(m.ponytailScoped(ponytail.subagentMatcher))
+      : warn(m.ponytailSubagents(f.tokens(PONYTAIL_RULES_TOKENS), PONYTAIL_SUBAGENT_MATCHER))
+    if (ponytail.band) info(m.ponytailBand)
+  }
 
   section(m.fixedContext)
   for (const path of [`${cwd}/CLAUDE.md`, `${cwd}/.claude/CLAUDE.md`, `${cfg}/CLAUDE.md`]) {
@@ -1471,6 +1507,64 @@ async function setAutoCompact($: EngineInterface, action: string, width = 100): 
   return out.join('\n')
 }
 
+// -------------------------------------------------------------------------------------------------------
+// Ponytail (plugin de "menos código"): o CATO só lê o que ele já publica, nunca muda nada dele.
+// Habilitado nas settings; nível vivo no ~/.claude/.ponytail-active (o mesmo que a faixa dele lê; ausente =
+// desligado); a faixa some com "off" no ~/.claude/.ponytail-band. Relido no máximo a cada 30 s.
+// -------------------------------------------------------------------------------------------------------
+type PonytailLevel = 'lite' | 'full' | 'ultra' | 'off'
+type Ponytail = { installed: boolean; level: PonytailLevel; band: boolean; subagentMatcher: string; mapOff: boolean }
+
+const PONYTAIL_LEVELS: readonly PonytailLevel[] = ['lite', 'full', 'ultra', 'off']
+const PONYTAIL_CACHE_MS = 30_000
+// Regras do Ponytail injetadas em cada início de sessão, compactação e subagente (SKILL.md ≈ 3,5 KB)
+const PONYTAIL_RULES_TOKENS = 950
+// Sugestão para o Ponytail pular subagentes só de leitura (Explore, cato:cato-explorer): o matcher dele é
+// uma regex sem âncora e sem diferença de maiúsculas, testada contra o agent_type
+const PONYTAIL_SUBAGENT_MATCHER = '^(?!.*explore)'
+let ponytailCache: { at: number; value: Ponytail } | null = null
+
+const isPonytailKey = (key: string): boolean => /^ponytail@/i.test(key)
+const ponytailBucket = (level: PonytailLevel): PonytailBucket =>
+  (level.charAt(0).toUpperCase() + level.slice(1)) as PonytailBucket
+
+async function ponytailState($: EngineInterface): Promise<Ponytail> {
+  const now = await $.clock.now()
+  if (ponytailCache && now - ponytailCache.at < PONYTAIL_CACHE_MS) return ponytailCache.value
+  const cfg = await claudeConfigDir($)
+  const cwd = (await $.session.cwd()).replace(/\\/g, '/').replace(/\/$/, '')
+  const userText = await $.fs.read(`${cfg}/settings.json`).catch(() => null)
+  const projectText = await $.fs.read(`${cwd}/.claude/settings.json`).catch(() => null)
+  const localText = await $.fs.read(`${cwd}/.claude/settings.local.json`).catch(() => null)
+  const settings = [userText, projectText, localText].map(parseJsonObject).filter((s): s is Json => !!s)
+  // O último que define vence (usuário < projeto < local), como no Claude Code
+  let enabled = false
+  for (const s of settings) {
+    const plugins = (s.enabledPlugins ?? {}) as Record<string, unknown>
+    for (const key of Object.keys(plugins)) if (isPonytailKey(key)) enabled = plugins[key] !== false
+  }
+  const envOf = (name: string): string => {
+    const fromSettings = settings.reduce<unknown>((v, s) => ((s.env as Json | undefined)?.[name] ?? v), undefined)
+    return typeof fromSettings === 'string' ? fromSettings : ''
+  }
+  const levelText = await $.fs.read(`${cfg}/.ponytail-active`).catch(() => null)
+  const live = String(levelText ?? '').trim().toLowerCase()
+  const level: PonytailLevel = (PONYTAIL_LEVELS as readonly string[]).includes(live) ? (live as PonytailLevel) : 'off'
+  const bandText = await $.fs.read(`${cfg}/.ponytail-band`).catch(() => null)
+  const installed = enabled || level !== 'off'
+  const matcherEnv = await $.env.get('PONYTAIL_SUBAGENT_MATCHER')
+  const mapEnv = await $.env.get('PONYTAIL_MAP')
+  const value: Ponytail = {
+    installed,
+    level,
+    band: installed && String(bandText ?? '').trim() !== 'off',
+    subagentMatcher: matcherEnv || envOf('PONYTAIL_SUBAGENT_MATCHER'),
+    mapOff: (mapEnv || envOf('PONYTAIL_MAP')) === '0',
+  }
+  ponytailCache = { at: now, value }
+  return value
+}
+
 // Sandboxes e logs brutos com mais de 14 dias, uma vez por sessão. $.fs não apaga arquivos: usa o rm
 // (Unix ou Git for Windows) e, sem ele, o del do cmd.
 async function cleanupOldFiles($: EngineInterface): Promise<void> {
@@ -1560,7 +1654,15 @@ export const register: Register = (on, rawOptions) => {
           : lastStepAt && now - lastStepAt > ttlMs ? 'idle'
             : lastModel && (sameModel(lastModel, usage.model) ?? lastModel === usage.model) === false ? 'model'
               : 'other'
+    // Com o Ponytail instalado: a chamada conta no nível ativo dele, para o /cato comparar saída e custo por nível
+    const ponytail = await ponytailState($).catch(() => null)
+    const bucket = ponytail?.installed ? ponytailBucket(ponytail.level) : null
     await bumpDay($, day => {
+      if (bucket) {
+        day[`pt${bucket}Calls`] += 1
+        day[`pt${bucket}Output`] += usage.output_tokens ?? 0
+        if (cost !== null) day[`pt${bucket}Cost`] += cost
+      }
       day.calls += 1
       if (cost === null) day.unpriced += 1
       else day.cost += cost
@@ -1635,7 +1737,13 @@ export const register: Register = (on, rawOptions) => {
     if (!overTokens && !overPercent) return result
     const instructions = compactInstructions()
     const compactCall = $.session.compact(instructions ? { instructions } : {})
-    const compacted = await compactCall.then(r => !('skip' in r && r.skip)).catch(() => false)
+    // Sem compactar quando o motor recusa (sessão headless, outro hook vetou): o motivo fica no log de debug
+    const compacted = await compactCall
+      .then(r => !('skip' in r && r.skip))
+      .catch((error: Error) => {
+        $.ui.log(`auto-compaction skipped: ${String(error?.message ?? error).slice(0, 200)}`)
+        return false
+      })
     if (compacted) {
       await ensureLanguage($)
       const f = fmt()

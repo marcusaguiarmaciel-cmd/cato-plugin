@@ -1,7 +1,7 @@
 {
   "name": "cato",
   "displayName": "CATO: Claude Adaptive Token Optimizer",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Cuts Claude Code's token cost with context and prompt-cache control, automatic compaction, compression of noisy output and efficient code navigation, with Serena, Graphify, ast-grep and GitHub MCP integration. Speaks English, Portuguese and Spanish.",
   "author": {
     "name": "Marcus Maciel",
@@ -114,7 +114,7 @@
       "type": "string",
       "title": "Compaction instructions",
       "description": "What the summary should keep when nobody gave instructions (auto-compaction, /compact with no text). Empty turns it off; the text of your /compact always wins.",
-      "default": "Keep the current goal and the user's open requests; the decisions made and why; the paths of changed files; errors and failing tests with the exact message; and the next steps. Do not reproduce file contents, tool output or logs: cite paths and CATO's #cmd_/#sbx_ IDs. Be concise and write the summary in the conversation's language."
+      "default": "Keep the current goal and the user's open requests; the decisions made and why; the paths of changed files; errors and failing tests with the exact message; and the next steps. Do not reproduce file contents, tool output or logs: cite paths and CATO's #cmd_/#sbx_ IDs. Be concise and write the summary in the conversation's language. Do not restate rules or mode instructions that plugins or hooks inject (such as PONYTAIL MODE): they are injected again after compaction."
     },
     "readGuard": {
       "type": "boolean",

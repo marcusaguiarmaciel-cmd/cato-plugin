@@ -94,7 +94,7 @@ As opções ficam no `/plugin`, na configuração do CATO.
 
 O CATO roda dentro do Claude Code. **Ele não envia nada para lugar nenhum**: sem telemetria, sem chamadas de rede próprias e sem dependências npm externas. Tudo o que ele lê fica na sua máquina.
 
-**O que ele lê.** As transcrições das sessões em `~/.claude/projects` (para `/cato` e `/cato-import`). No `/cato-doctor`: `settings.json`, `settings.local.json` e o `.mcp.json` do projeto; os servidores MCP são contados pelos nomes das ferramentas vistas na sessão. Ele nunca lê o `~/.claude.json`, credenciais ou dados de conta. Arquivos com cara de segredo (`.env`, `*.pem`, `*.key`, `id_rsa`…) nunca são lidos pelas ferramentas do CATO.
+**O que ele lê.** As transcrições das sessões em `~/.claude/projects` (para `/cato` e `/cato-import`). No `/cato-doctor`: `settings.json`, `settings.local.json` e o `.mcp.json` do projeto; os servidores MCP são contados pelos nomes das ferramentas vistas na sessão. Com o Ponytail instalado, também lê `~/.claude/.ponytail-active` e `~/.claude/.ponytail-band` (o nível e a faixa do próprio Ponytail). Ele nunca lê o `~/.claude.json`, credenciais ou dados de conta. Arquivos com cara de segredo (`.env`, `*.pem`, `*.key`, `id_rsa`…) nunca são lidos pelas ferramentas do CATO.
 
 **O que ele escreve.** Só dentro de `~/.cato/logs` (logs brutos das saídas de shell comprimidas) e `~/.cato/sandbox` (respostas MCP grandes), além do próprio store dentro do Claude Code. Os arquivos ali são apagados após 14 dias. São logs em texto puro e JSON para as ferramentas de busca do próprio CATO; nada os executa nem carrega. Ele nunca escreve settings, arquivos de build, `CLAUDE.md` nem nenhum arquivo do seu projeto.
 
@@ -145,6 +145,26 @@ Todas são detectadas sozinhas: sem a ferramenta instalada, nada muda.
 | **GitHub MCP** | Tira do JSON os campos de API (`*_url`, `node_id`, avatares, usuário completo vira só o login, labels viram nomes) e os diffs de lockfiles (`compactGithub`); nega `get_file_contents` de lockfiles; o que continuar grande vai para o sandbox com dicas de `fields`/`perPage` |
 
 A skill `cato-efficiency` e o agente `cato-explorer` dizem ao modelo qual ferramenta usar primeiro quando cada uma está disponível.
+
+## Usando com o Ponytail
+
+O [Ponytail](https://github.com/DietrichGebert/ponytail) faz o Claude escrever menos código; o CATO deixa cada token mais barato. Os dois funcionam juntos, e o CATO se adapta quando encontra o Ponytail (ele só lê os arquivos do Ponytail, nunca os muda):
+
+| O quê | Como |
+|---|---|
+| Prova da economia | O `/cato` ganha uma tabela **Ponytail por nível**: chamadas, tokens de saída e custo por chamada em lite, full, ultra e desligado, e quantos tokens de saída a menos cada chamada escreveu com o Ponytail ligado |
+| Subagentes | O Ponytail acrescenta ~1k tokens de regras em todo subagente. O `/cato-doctor` sugere `"PONYTAIL_SUBAGENT_MATCHER": "^(?!.*explore)"` no `env` do `settings.json`, para os agentes só de leitura (Explore, `cato-explorer`) ficarem sem elas |
+| Compactação | As instruções de resumo do CATO pulam as regras que os plugins injetam de novo depois da compactação, como as do Ponytail |
+| Saída de testes | A compressão do shell sempre mantém as linhas de resumo do runner (`N passed`, `N failed`), que a faixa do Ponytail conta |
+| Status | Com a faixa do Ponytail visível, o status do CATO deixa de fora o custo da sessão, que a faixa já mostra |
+
+`settings.json` recomendado:
+
+```json
+{
+  "env": { "PONYTAIL_SUBAGENT_MATCHER": "^(?!.*explore)" }
+}
+```
 
 ## Desenvolvimento
 
